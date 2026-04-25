@@ -5,6 +5,16 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 7: Orchestrator
+
+- Implemented `Orchestrator` in `internal/core/services/orchestrator.go`
+- Orchestrator handles the full lifecycle: initializes receivers, triggers HTTP action, and polls receivers concurrently
+- Uses `sync.WaitGroup` to wait for all receiver collections concurrently while respecting per-receiver timeouts
+- Aggregates statuses correctly and executes the `Notifier` port if the global status is `failed` or `error`
+- Uses `defer` to ensure all receivers are cleanly stopped (`Stop()`) regardless of errors
+
+---
+
 ## [2026-04-25] — Step 6: Receiver Adapters
 
 - Implemented `ReceiverRegistry` using the Factory pattern (`func() ports.Receiver`) to ensure each test execution gets a fresh stateful receiver instance

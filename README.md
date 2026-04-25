@@ -158,6 +158,7 @@ Required environment variables:
 
 ## Historial de Cambios
 
+- **[2026-04-25]:** Step 7 — Orchestrator. Implementado `Orchestrator` que une todos los puertos. Maneja ciclo de vida del test, ejecución concurrente de receivers con `sync.WaitGroup`, agregación de resultados y llamadas al Notifier.
 - **[2026-04-25]:** Step 6 — Receiver Adapters. Implementado `ReceiverRegistry` usando patrón factory y 4 receivers (`webhook`, `sms`, `push`, `email`) que hacen polling del `Store` usando un Ticker.
 - **[2026-04-25]:** Step 5 — Trigger & Notifier Adapters. Implementados `HTTPTrigger` y `WebhookNotifier` usando un helper nuevo `pkg/template` para el reemplazo recursivo de variables (`{{run_id}}`, etc.).
 - **[2026-04-25]:** Step 4 — Assertion Adapters. Implementados 5 assertions (`contains`, `equals`, `matches`, `present`, `not_contains`) y `AssertionRegistry` con patrón factory.
