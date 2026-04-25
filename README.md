@@ -158,6 +158,7 @@ Required environment variables:
 
 ## Historial de Cambios
 
+- **[2026-04-25]:** Step 10 — Cron Scheduler. Implementado `Scheduler` usando `robfig/cron/v3` para desencadenar la ejecución automática de los tests definidos en YAML según su cronograma.
 - **[2026-04-25]:** Step 9 — HTTP API Server. Implementado servidor HTTP primario para desencadenar tests manualmente (`/run`), chequear salud (`/health`) y ver resultados (`/results`).
 - **[2026-04-25]:** Step 8 — Webhook Server. Implementado servidor HTTP primario para recibir webhooks entrantes (Twilio, Meta) y depositarlos en el Redis `Store`.
 - **[2026-04-25]:** Step 7 — Orchestrator. Implementado `Orchestrator` que une todos los puertos. Maneja ciclo de vida del test, ejecución concurrente de receivers con `sync.WaitGroup`, agregación de resultados y llamadas al Notifier.

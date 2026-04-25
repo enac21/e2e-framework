@@ -5,6 +5,14 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 10: Cron Scheduler (Primary Adapter)
+
+- Implemented `adapters/primary/cron/scheduler.go` using `github.com/robfig/cron/v3`
+- The scheduler reads the `schedule` property from the YAML definition and triggers the orchestrator
+- Runs in a separate goroutine and handles lifecycle (Start/Stop)
+
+---
+
 ## [2026-04-25] — Step 9: HTTP API Server (Primary Adapter)
 
 - Implemented `adapters/primary/http/server.go` to expose the REST API
