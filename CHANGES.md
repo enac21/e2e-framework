@@ -5,6 +5,14 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 8: Webhook Server (Primary Adapter)
+
+- Implemented `adapters/primary/webhook/server.go` to receive incoming webhooks
+- Created `Extractor` interface and implementations for `twilio` (SMS) and `meta` (Push)
+- The webhook server extracts payloads into `domain.Message` and deposits them into the `Store`
+
+---
+
 ## [2026-04-25] — Step 7: Orchestrator
 
 - Implemented `Orchestrator` in `internal/core/services/orchestrator.go`
