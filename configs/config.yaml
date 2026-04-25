@@ -1,0 +1,37 @@
+# Global configuration for the e2e-testing-service.
+# Credentials and infrastructure values should always come from
+# environment variables via {{env.VAR_NAME}}. Never hardcode secrets.
+
+version: "1"
+
+server:
+  port: 8080
+  timeout: 30s
+
+store:
+  redis:
+    url: "{{env.REDIS_URL}}"
+    ttl: 300s
+
+scheduler:
+  enabled: true
+  timezone: "Europe/Madrid"
+
+tests:
+  path: "./tests"
+
+receivers:
+  email:
+    # fields TBD during EmailReceiver implementation
+  sms:
+    provider: twilio
+    # fields TBD during SmsReceiver implementation
+  push:
+    provider: fcm
+    # fields TBD during PushReceiver implementation
+  webhook:
+    base_url: "{{env.WEBHOOK_BASE_URL}}"
+
+logging:
+  level: info       # debug | info | warn | error
+  format: json      # json (production) | text (local)
