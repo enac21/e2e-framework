@@ -158,5 +158,6 @@ Required environment variables:
 
 ## Historial de Cambios
 
+- **[2026-04-25]:** Step 3 — Store Adapter (Redis). Implementado `RedisStore` con `Deposit`, `Claim`, `Reserve` (SetNX atómico), `Release`. Dependencia `go-redis/v9`.
 - **[2026-04-25]:** Step 2 — Core Domain. Implemented all domain types (`Message`, `TestResult`, `RunStatus`, `TestDefinition` and sub-types) and all five port interfaces (`Trigger`, `Receiver`, `Assertion`, `Store`, `Notifier`) with full godoc comments. Zero adapter imports in `core/`.
 - **[2026-04-25]:** Step 1 — Project Skeleton. Created full directory structure following hexagonal architecture, all placeholder Go files with package declarations and responsibility comments, `Makefile`, `Dockerfile`, `docker-compose.yml`, `configs/config.yaml`, `tests/example_welcome_email.yaml`, `CONTRIBUTING.md`, `CHANGES.md`, and `README.md`.

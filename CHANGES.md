@@ -5,6 +5,16 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 3: Store Adapter (Redis)
+
+- Implemented `RedisStore` in `adapters/secondary/store/redis.go` implementing `ports.Store`
+- Four methods: `Deposit` (SET+JSON+TTL), `Claim` (GET+deserialize, nil on miss), `Reserve` (SetNX atomic), `Release` (DEL)
+- Constructor `NewRedisStore(cfg)` accepts `RedisStoreConfig` with URL and TTL
+- Added `Close()` for graceful shutdown of Redis client
+- New dependency: `github.com/redis/go-redis/v9`
+
+---
+
 ## [2026-04-25] — Step 2: Core Domain
 
 - Implemented `domain.Message` (NormalizedMessage) with RunID, ReceiverType, ReceivedAt, Headers, Fields, and Raw
