@@ -158,6 +158,7 @@ Required environment variables:
 
 ## Historial de Cambios
 
+- **[2026-04-25]:** Step 11 — Config & YAML Loader. Implementado parser de configuración y de definiciones de tests usando `gopkg.in/yaml.v3`, con resolución automática de variables de entorno (`{{env.VAR_NAME}}`).
 - **[2026-04-25]:** Step 10 — Cron Scheduler. Implementado `Scheduler` usando `robfig/cron/v3` para desencadenar la ejecución automática de los tests definidos en YAML según su cronograma.
 - **[2026-04-25]:** Step 9 — HTTP API Server. Implementado servidor HTTP primario para desencadenar tests manualmente (`/run`), chequear salud (`/health`) y ver resultados (`/results`).
 - **[2026-04-25]:** Step 8 — Webhook Server. Implementado servidor HTTP primario para recibir webhooks entrantes (Twilio, Meta) y depositarlos en el Redis `Store`.

@@ -5,6 +5,14 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 11: Config and YAML Loader
+
+- Implemented `internal/pkg/config/config.go` to parse `configs/config.yaml`
+- Implemented `internal/pkg/config/loader.go` to traverse `tests/` and parse `*.yaml` files into `domain.TestDefinition` structs
+- Added an environment variable resolver that automatically replaces `{{env.VAR_NAME}}` in raw YAML strings before unmarshaling using `gopkg.in/yaml.v3`
+
+---
+
 ## [2026-04-25] — Step 10: Cron Scheduler (Primary Adapter)
 
 - Implemented `adapters/primary/cron/scheduler.go` using `github.com/robfig/cron/v3`
