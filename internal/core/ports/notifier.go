@@ -7,5 +7,5 @@ import (
 )
 
 type Notifier interface {
-	Notify(ctx context.Context, result *domain.TestResult) error
+	Notify(ctx context.Context, cfg domain.OnFailureConfig, result *domain.TestResult) error
 }

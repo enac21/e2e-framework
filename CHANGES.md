@@ -5,6 +5,16 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 5: Trigger and Notifier Adapters
+
+- Modified `ports.Notifier` interface to receive `domain.OnFailureConfig` for stateless execution
+- Added `internal/pkg/template` for recursive string variable replacement in nested maps and slices
+- Implemented `HTTPTrigger` adapter resolving `{{run_id}}` in URL, Headers, and Body before HTTP dispatch
+- Implemented `WebhookNotifier` adapter resolving `{{run_id}}`, `{{test_id}}`, and `{{error}}` for failure alerts
+- Both adapters use standard `http.Client` with timeout handling and JSON serialization
+
+---
+
 ## [2026-04-25] — Step 4: Assertion Adapters
 
 - Implemented `AssertionRegistry` with factory pattern in `assertion/registry.go`
