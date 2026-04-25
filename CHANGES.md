@@ -5,6 +5,16 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 9: HTTP API Server (Primary Adapter)
+
+- Implemented `adapters/primary/http/server.go` to expose the REST API
+- `GET /health` endpoint for readiness/liveness checks
+- `POST /run?id={test_id}` endpoint to trigger manual execution of tests via the `Orchestrator`
+- `GET /results` endpoint to fetch in-memory aggregated test results
+- Implemented graceful shutdown and thread-safe results array
+
+---
+
 ## [2026-04-25] — Step 8: Webhook Server (Primary Adapter)
 
 - Implemented `adapters/primary/webhook/server.go` to receive incoming webhooks

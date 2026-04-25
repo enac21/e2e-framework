@@ -1,4 +1,16 @@
-// Package http implements the primary HTTP API adapter for the e2e-testing-service.
-// This file defines the handler for GET /health, which returns a simple 200 OK
-// response with status information for liveness/readiness probes.
 package http
+
+import (
+	"net/http"
+)
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{
+		"status": "ok",
+	})
+}
