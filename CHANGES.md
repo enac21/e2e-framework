@@ -5,6 +5,15 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 6: Receiver Adapters
+
+- Implemented `ReceiverRegistry` using the Factory pattern (`func() ports.Receiver`) to ensure each test execution gets a fresh stateful receiver instance
+- Implemented 4 receiver adapters: `webhook`, `sms`, `push`, and `email`
+- All receivers share the same `Store` polling strategy (`store.Claim` inside a 1-second ticker loop), unifying the architecture around the Redis buffer
+- Updated `CONTRIBUTING.md` registration example to use the factory pattern instead of a singleton instance
+
+---
+
 ## [2026-04-25] — Step 5: Trigger and Notifier Adapters
 
 - Modified `ports.Notifier` interface to receive `domain.OnFailureConfig` for stateless execution

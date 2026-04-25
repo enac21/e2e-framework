@@ -1,4 +1,31 @@
-// Package receiver provides receiver adapter implementations for the e2e-testing-service.
-// This file defines the ReceiverRegistry, which maps receiver type strings (e.g. "email",
-// "sms") to their corresponding Receiver implementations, allowing YAML-driven resolution.
 package receiver
+
+import (
+	"fmt"
+
+	"e2e-framework/internal/core/ports"
+)
+
+type ReceiverFactory func() ports.Receiver
+
+type ReceiverRegistry struct {
+	factories map[string]ReceiverFactory
+}
+
+func NewReceiverRegistry() *ReceiverRegistry {
+	return &ReceiverRegistry{
+		factories: make(map[string]ReceiverFactory),
+	}
+}
+
+func (r *ReceiverRegistry) Register(typeName string, factory ReceiverFactory) {
+	r.factories[typeName] = factory
+}
+
+func (r *ReceiverRegistry) Create(typeName string) (ports.Receiver, error) {
+	factory, exists := r.factories[typeName]
+	if !exists {
+		return nil, fmt.Errorf("unknown receiver type: %q", typeName)
+	}
+	return factory(), nil
+}

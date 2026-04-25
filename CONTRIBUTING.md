@@ -65,8 +65,9 @@ In `cmd/server/main.go`, instantiate your receiver and register it in the
 `ReceiverRegistry`:
 
 ```go
-slackReceiver := slack.New(config.Receivers.Slack, store, logger)
-receiverRegistry.Register("slack", slackReceiver)
+receiverRegistry.Register("slack", func() ports.Receiver {
+    return slack.NewReceiver(store)
+})
 ```
 
 ### Step 5 — Use in test YAML files
