@@ -1,5 +1,13 @@
-// Package ports defines the interfaces (contracts) that the core domain
-// relies on. Adapters implement these interfaces to connect the domain
-// to external infrastructure. This file defines the Receiver interface,
-// which waits for and collects feedback from a notification channel.
 package ports
+
+import (
+	"context"
+
+	"e2e-framework/internal/core/domain"
+)
+
+type Receiver interface {
+	Start(ctx context.Context, runID string) error
+	Collect(ctx context.Context) (*domain.Message, error)
+	Stop() error
+}

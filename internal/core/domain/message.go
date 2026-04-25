@@ -1,4 +1,12 @@
-// Package domain contains the core business models for the e2e-testing-service.
-// This file defines the NormalizedMessage model — the common structure that all
-// receivers produce after extracting data from their respective notification channels.
 package domain
+
+import "time"
+
+type Message struct {
+	RunID        string
+	ReceiverType string
+	ReceivedAt   time.Time
+	Headers      map[string]string
+	Fields       map[string]string
+	Raw          []byte
+}

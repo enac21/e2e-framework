@@ -1,6 +1,3 @@
-// Package main is the entry point for the e2e-testing-service.
-// It is responsible for wiring all adapters, configuring dependencies,
-// and starting the server. No business logic should live here.
 package main
 
 import "fmt"

@@ -5,6 +5,23 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 2: Core Domain
+
+- Implemented `domain.Message` (NormalizedMessage) with RunID, ReceiverType, ReceivedAt, Headers, Fields, and Raw
+- Implemented `domain.RunStatus` enum with four states: `passed`, `failed`, `error`, `skipped`
+- Implemented `domain.ReceiverResult` for per-channel test outcomes
+- Implemented `domain.TestResult` for complete test execution results
+- Implemented `domain.TestDefinition` and all sub-types: `RetryConfig`, `TriggerConfig`, `ReceiverConfig`, `AssertionConfig`, `OnFailureConfig`, `WebhookAction` — all with YAML struct tags
+- Implemented `ports.Trigger` interface with stateless `Execute(ctx, TriggerConfig, runID)` signature
+- Implemented `ports.Receiver` interface with `Start`/`Collect`/`Stop` lifecycle
+- Implemented `ports.Assertion` interface with `Assert(msg)` returning descriptive errors
+- Implemented `ports.Store` interface with `Deposit`/`Claim`/`Reserve`/`Release` methods
+- Implemented `ports.Notifier` interface with fire-and-forget `Notify` semantics
+- All types and interfaces have complete godoc comments
+- Zero imports from `adapters/` in any `core/` file
+
+---
+
 ## [2026-04-25] — Step 1: Project Skeleton
 
 - Created full directory structure following hexagonal architecture pattern
