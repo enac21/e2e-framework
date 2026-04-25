@@ -5,6 +5,16 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 4: Assertion Adapters
+
+- Implemented `AssertionRegistry` with factory pattern in `assertion/registry.go`
+- Implemented 5 assertions: `ContainsAssertion`, `EqualsAssertion`, `MatchesAssertion`, `PresentAssertion`, `NotContainsAssertion`
+- Each assertion returns descriptive errors with field name, expected value, and actual value
+- `MatchesAssertion` compiles regex at construction time for fail-fast on invalid patterns
+- Registry returns `fmt.Errorf` for unknown assertion types, never panics
+
+---
+
 ## [2026-04-25] — Step 3: Store Adapter (Redis)
 
 - Implemented `RedisStore` in `adapters/secondary/store/redis.go` implementing `ports.Store`
