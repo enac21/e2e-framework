@@ -5,6 +5,15 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-25] — Step 12: Main Wiring & Graceful Shutdown
+
+- Implemented `cmd/server/main.go` using `golang.org/x/sync/errgroup` to run all primary adapters concurrently
+- Loaded configurations and registered all 5 assertion types and 4 receiver types
+- Instantiated the `Store`, `Trigger`, and `Notifier` adapters and passed them to the `Orchestrator`
+- Implemented robust `SIGINT`/`SIGTERM` signal catching and graceful shutdown for HTTP servers and Cron scheduler
+
+---
+
 ## [2026-04-25] — Step 11: Config and YAML Loader
 
 - Implemented `internal/pkg/config/config.go` to parse `configs/config.yaml`
