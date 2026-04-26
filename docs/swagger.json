@@ -1,0 +1,315 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "This is the API for the e2e-framework testing service.",
+        "title": "e2e-framework API",
+        "termsOfService": "http://swagger.io/terms/",
+        "contact": {
+            "name": "API Support",
+            "url": "http://www.swagger.io/support",
+            "email": "support@swagger.io"
+        },
+        "license": {
+            "name": "Apache 2.0",
+            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+        },
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/health": {
+            "get": {
+                "description": "Get the current status of the service",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Health"
+                ],
+                "summary": "Check service health",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/results": {
+            "get": {
+                "description": "Get the last 100 test results",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Results"
+                ],
+                "summary": "List test results",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/domain.TestResult"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/results/{run_id}": {
+            "get": {
+                "description": "Get a test result by its unique Run ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Results"
+                ],
+                "summary": "Get a specific test result",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/domain.TestResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Run ID required",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Run not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/run": {
+            "post": {
+                "description": "Trigger a specific test by ID. Can be sync or async depends of the test definition.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tests"
+                ],
+                "summary": "Run a test",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test ID defined in tests definitions",
+                        "name": "id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/domain.TestResult"
+                        }
+                    },
+                    "202": {
+                        "description": "Async mode: returns run_id and status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Test ID not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/webhook/{provider}": {
+            "post": {
+                "description": "Deposit messages from providers into the store",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Webhooks"
+                ],
+                "summary": "Receive webhook from provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider name (e.g., github, gitlab)",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted"
+                    },
+                    "400": {
+                        "description": "Error extracting message data",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown provider",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "domain.Message": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "raw": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                        "format": "int32"
+                    }
+                },
+                "receivedAt": {
+                    "type": "string"
+                },
+                "receiverType": {
+                    "type": "string"
+                },
+                "runID": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ReceiverResult": {
+            "type": "object",
+            "properties": {
+                "durationMs": {
+                    "type": "integer",
+                    "format": "int64"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "message": {
+                    "$ref": "#/definitions/domain.Message"
+                },
+                "status": {
+                    "$ref": "#/definitions/domain.RunStatus"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.RunStatus": {
+            "type": "string",
+            "enum": [
+                "passed",
+                "failed",
+                "error",
+                "skipped",
+                "running"
+            ],
+            "x-enum-varnames": [
+                "StatusPassed",
+                "StatusFailed",
+                "StatusError",
+                "StatusSkipped",
+                "StatusRunning"
+            ]
+        },
+        "domain.TestResult": {
+            "type": "object",
+            "properties": {
+                "durationMs": {
+                    "type": "integer",
+                    "format": "int64"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "finishedAt": {
+                    "type": "string"
+                },
+                "receivers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.ReceiverResult"
+                    }
+                },
+                "runID": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/domain.RunStatus"
+                },
+                "testID": {
+                    "type": "string"
+                },
+                "triggerVars": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    }
+}

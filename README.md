@@ -99,6 +99,23 @@ make docker-down
 | `POST` | `/run?id={test_id}` | Trigger a specific test (sync or async depending on YAML) |
 | `GET`  | `/results` | All stored test results (last 100) |
 | `GET`  | `/results/{run_id}` | Result for a specific run (supports polling for async) |
+| `GET`  | `/swagger/` | Interactive API documentation (Swagger UI) |
+
+---
+
+## Swagger Documentation
+
+To generate or update the API documentation, ensure you have `swag` installed:
+```bash
+go install github.com/swaggo/swag/cmd/swag@latest
+```
+
+Then run the following command from the root directory:
+```bash
+swag init -g cmd/server/main.go
+```
+
+The documentation will be available at `/swagger/index.html` when the service is running.
 
 ---
 

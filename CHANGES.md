@@ -5,6 +5,16 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-26] — Step 17: Swagger Documentation
+
+- Added Swagger annotations to `cmd/server/main.go` for general API information.
+- Added Swagger annotations to all HTTP handlers in `internal/adapters/primary/http/server.go`.
+- Registered `/swagger/*` endpoint using `http-swagger` for interactive API documentation.
+- Generated Swagger 2.0 documentation using `swag init`.
+- Updated `README.md` with instructions on how to access the Swagger UI and how to regenerate the documentation.
+
+---
+
 ## [2026-04-26] — Step 16: Orchestrator RunID Ownership & Refactoring
 
 - `Orchestrator.RunTest` now generates the RunID internally and returns `(string, <-chan *domain.TestResult)` immediately, launching execution asynchronously.

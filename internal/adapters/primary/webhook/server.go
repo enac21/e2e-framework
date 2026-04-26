@@ -49,6 +49,17 @@ func (s *Server) Stop() error {
 	return s.httpServer.Shutdown(ctx)
 }
 
+// handleWebhook godoc
+// @Summary Receive webhook from provider
+// @Description Deposit messages from providers into the store
+// @Tags Webhooks
+// @Param provider path string true "Provider name (e.g., github, gitlab)"
+// @Produce json
+// @Success 202
+// @Failure 404 {string} string "Unknown provider"
+// @Failure 400 {string} string "Error extracting message data"
+// @Failure 500 {string} string "Internal server error"
+// @Router /webhook/{provider} [post]
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithoutCancel(r.Context())
 
@@ -80,5 +91,5 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }

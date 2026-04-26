@@ -1,0 +1,213 @@
+basePath: /
+definitions:
+  domain.Message:
+    properties:
+      fields:
+        additionalProperties:
+          type: string
+        type: object
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      raw:
+        items:
+          format: int32
+          type: integer
+        type: array
+      receivedAt:
+        type: string
+      receiverType:
+        type: string
+      runID:
+        type: string
+    type: object
+  domain.ReceiverResult:
+    properties:
+      durationMs:
+        format: int64
+        type: integer
+      error:
+        type: string
+      message:
+        $ref: '#/definitions/domain.Message'
+      status:
+        $ref: '#/definitions/domain.RunStatus'
+      type:
+        type: string
+    type: object
+  domain.RunStatus:
+    enum:
+    - passed
+    - failed
+    - error
+    - skipped
+    - running
+    type: string
+    x-enum-varnames:
+    - StatusPassed
+    - StatusFailed
+    - StatusError
+    - StatusSkipped
+    - StatusRunning
+  domain.TestResult:
+    properties:
+      durationMs:
+        format: int64
+        type: integer
+      error:
+        type: string
+      finishedAt:
+        type: string
+      receivers:
+        items:
+          $ref: '#/definitions/domain.ReceiverResult'
+        type: array
+      runID:
+        type: string
+      startedAt:
+        type: string
+      status:
+        $ref: '#/definitions/domain.RunStatus'
+      testID:
+        type: string
+      triggerVars:
+        additionalProperties:
+          type: string
+        type: object
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: This is the API for the e2e-framework testing service.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: e2e-framework API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      description: Get the current status of the service
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Check service health
+      tags:
+      - Health
+  /results:
+    get:
+      description: Get the last 100 test results
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/domain.TestResult'
+            type: array
+      summary: List test results
+      tags:
+      - Results
+  /results/{run_id}:
+    get:
+      description: Get a test result by its unique Run ID
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain.TestResult'
+        "400":
+          description: Run ID required
+          schema:
+            type: string
+        "404":
+          description: Run not found
+          schema:
+            type: string
+      summary: Get a specific test result
+      tags:
+      - Results
+  /run:
+    post:
+      description: Trigger a specific test by ID. Can be sync or async depends of
+        the test definition.
+      parameters:
+      - description: Test ID defined in tests definitions
+        in: query
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain.TestResult'
+        "202":
+          description: 'Async mode: returns run_id and status'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Test ID not found
+          schema:
+            type: string
+        "405":
+          description: Method not allowed
+          schema:
+            type: string
+      summary: Run a test
+      tags:
+      - Tests
+  /webhook/{provider}:
+    post:
+      description: Deposit messages from providers into the store
+      parameters:
+      - description: Provider name (e.g., github, gitlab)
+        in: path
+        name: provider
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+        "400":
+          description: Error extracting message data
+          schema:
+            type: string
+        "404":
+          description: Unknown provider
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Receive webhook from provider
+      tags:
+      - Webhooks
+swagger: "2.0"

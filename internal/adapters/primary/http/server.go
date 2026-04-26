@@ -12,6 +12,10 @@ import (
 
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/services"
+
+	_ "e2e-framework/docs"
+
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 const maxStoredResults = 100
@@ -42,9 +46,13 @@ func NewServer(port int, orchestrator *services.Orchestrator, tests map[string]d
 	mux.HandleFunc("/run", s.handleRun)
 
 	log.Printf("[HTTP API] Registered endpoint: GET /results")
-	log.Printf("[HTTP API] Registered endpoint: GET /results/{run_id}")
 	mux.HandleFunc("/results", s.handleResults)
+
+	log.Printf("[HTTP API] Registered endpoint: GET /results/{run_id}")
 	mux.HandleFunc("/results/", s.handleResultByID)
+
+	log.Printf("[HTTP API] Registered endpoint: GET /swagger/*")
+	mux.Handle("/swagger/", httpSwagger.WrapHandler)
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
@@ -81,6 +89,17 @@ func (s *Server) storeResult(res *domain.TestResult) {
 	}
 }
 
+// handleRun godoc
+// @Summary Run a test
+// @Description Trigger a specific test by ID. Can be sync or async depends of the test definition.
+// @Tags Tests
+// @Param id query string true "Test ID defined in tests definitions"
+// @Produce json
+// @Success 200 {object} domain.TestResult
+// @Success 202 {object} map[string]string "Async mode: returns run_id and status"
+// @Failure 405 {string} string "Method not allowed"
+// @Failure 404 {string} string "Test ID not found"
+// @Router /run [post]
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithoutCancel(r.Context())
 
@@ -125,6 +144,16 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
+// handleResultByID godoc
+// @Summary Get a specific test result
+// @Description Get a test result by its unique Run ID
+// @Tags Results
+// @Param run_id path string true "Run ID"
+// @Produce json
+// @Success 200 {object} domain.TestResult
+// @Failure 400 {string} string "Run ID required"
+// @Failure 404 {string} string "Run not found"
+// @Router /results/{run_id} [get]
 func (s *Server) handleResultByID(w http.ResponseWriter, r *http.Request) {
 	runID := strings.TrimPrefix(r.URL.Path, "/results/")
 	if runID == "" {
@@ -146,6 +175,13 @@ func (s *Server) handleResultByID(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
+// handleResults godoc
+// @Summary List test results
+// @Description Get the last 100 test results
+// @Tags Results
+// @Produce json
+// @Success 200 {array} domain.TestResult
+// @Router /results [get]
 func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	list := make([]*domain.TestResult, 0, len(s.resultOrder))
@@ -156,6 +192,13 @@ func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, list)
 }
 
+// handleHealth godoc
+// @Summary Check service health
+// @Description Get the current status of the service
+// @Tags Health
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /health [get]
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
