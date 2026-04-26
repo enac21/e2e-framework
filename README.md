@@ -161,6 +161,7 @@ Required environment variables:
 - [ ] **Trigger Data Extraction**: Add the ability to parse the response body of the initial HTTP Trigger to save/extract variables (e.g., a `transaction_id` returned by an API) that can be used later in receiver assertions.
 - [ ] **Async API Execution**: The `/run` API endpoint currently blocks until the test finishes. Implement an async mode (returning a tracking ID immediately) and make this behavior configurable per test.
 - [ ] **Redis Data Cleanup**: Evaluate whether to explicitly delete test data and reservations from Redis immediately after a test finishes, instead of strictly relying on the key TTL expiration.
+- [ ] **Recipient Reservation (Concurrency Protection)**: Wire the existing `Store.Reserve` / `Store.Release` atomic operations into the Orchestrator lifecycle. This prevents race conditions when multiple concurrent test runs listen for messages on the same channel/recipient (e.g., two runs both waiting for an SMS to `+34666123456`). Requires adding recipient information to the YAML test definition.
 
 ---
 
