@@ -9,16 +9,17 @@ import (
 )
 
 type Config struct {
-	Store struct {
-		RedisURL string `yaml:"redis_url"`
-	} `yaml:"store"`
-	API struct {
+	Server struct {
 		Port int `yaml:"port"`
-	} `yaml:"api"`
+	} `yaml:"server"`
+	Store struct {
+		Redis struct {
+			URL string `yaml:"url"`
+		} `yaml:"redis"`
+	} `yaml:"store"`
 	Webhook struct {
 		Port int `yaml:"port"`
 	} `yaml:"webhook"`
-	Receivers map[string]map[string]any `yaml:"receivers"`
 }
 
 var envRegex = regexp.MustCompile(`\{\{env\.([^}]+)\}\}`)

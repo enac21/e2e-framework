@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -28,8 +29,14 @@ func NewServer(port int, orchestrator *services.Orchestrator, tests map[string]d
 	}
 
 	mux := http.NewServeMux()
+	
+	log.Printf("[HTTP API] Registered endpoint: GET /health")
 	mux.HandleFunc("/health", s.handleHealth)
+	
+	log.Printf("[HTTP API] Registered endpoint: POST /run")
 	mux.HandleFunc("/run", s.handleRun)
+	
+	log.Printf("[HTTP API] Registered endpoint: GET /results")
 	mux.HandleFunc("/results", s.handleResults)
 
 	s.httpServer = &http.Server{

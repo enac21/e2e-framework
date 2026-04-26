@@ -8,6 +8,9 @@ server:
   port: 8080
   timeout: 30s
 
+webhook:
+  port: 8081
+
 store:
   redis:
     url: "{{env.REDIS_URL}}"

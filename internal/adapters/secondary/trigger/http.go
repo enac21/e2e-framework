@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/template"
@@ -27,7 +29,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 		"run_id": runID,
 	}
 
-	url := template.ReplaceString(def.URL, vars)
+	targetURL := template.ReplaceString(def.URL, vars)
 	method := def.Method
 	if method == "" {
 		method = http.MethodGet
@@ -38,11 +40,29 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 	var reqBody io.Reader
 	if def.Body != nil {
 		bodyMap := template.ReplaceMap(def.Body, vars)
-		b, err := json.Marshal(bodyMap)
-		if err != nil {
-			return fmt.Errorf("failed to serialize trigger body: %w", err)
+
+		isForm := false
+		for k, v := range headers {
+			if strings.ToLower(k) == "content-type" {
+				if strings.Contains(strings.ToLower(v), "application/x-www-form-urlencoded") {
+					isForm = true
+				}
+			}
 		}
-		reqBody = bytes.NewReader(b)
+
+		if isForm {
+			form := url.Values{}
+			for k, v := range bodyMap {
+				form.Set(k, fmt.Sprintf("%v", v))
+			}
+			reqBody = strings.NewReader(form.Encode())
+		} else {
+			b, err := json.Marshal(bodyMap)
+			if err != nil {
+				return fmt.Errorf("failed to serialize trigger body: %w", err)
+			}
+			reqBody = bytes.NewReader(b)
+		}
 	}
 
 	reqCtx := ctx
@@ -52,7 +72,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 		defer cancel()
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, method, url, reqBody)
+	req, err := http.NewRequestWithContext(reqCtx, method, targetURL, reqBody)
 	if err != nil {
 		return fmt.Errorf("failed to create trigger request: %w", err)
 	}

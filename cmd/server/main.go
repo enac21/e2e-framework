@@ -44,7 +44,7 @@ func main() {
 
 	// Setup secondary adapters
 	redisStore, err := store.NewRedisStore(store.RedisStoreConfig{
-		URL: cfg.Store.RedisURL,
+		URL: cfg.Store.Redis.URL,
 		TTL: 24 * time.Hour,
 	})
 	if err != nil {
@@ -72,7 +72,7 @@ func main() {
 	orchestrator := services.NewOrchestrator(httpTrigger, receiverReg, assertionReg, webhookNotifier)
 
 	// Setup primary adapters
-	apiServer := api.NewServer(cfg.API.Port, orchestrator, tests)
+	apiServer := api.NewServer(cfg.Server.Port, orchestrator, tests)
 	whServer := webhook.NewServer(cfg.Webhook.Port, redisStore)
 	whServer.RegisterExtractor("twilio", webhook.NewTwilioExtractor())
 	whServer.RegisterExtractor("meta", webhook.NewMetaExtractor())
@@ -91,7 +91,7 @@ func main() {
 	g, gCtx := errgroup.WithContext(ctx)
 
 	// Start servers
-	log.Printf("Starting API server on port %d", cfg.API.Port)
+	log.Printf("Starting API server on port %d", cfg.Server.Port)
 	g.Go(func() error { return apiServer.Start() })
 
 	log.Printf("Starting Webhook server on port %d", cfg.Webhook.Port)

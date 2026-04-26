@@ -156,9 +156,18 @@ Required environment variables:
 
 ---
 
+## Roadmap / Pending Tasks
+
+- [ ] **Trigger Data Extraction**: Add the ability to parse the response body of the initial HTTP Trigger to save/extract variables (e.g., a `transaction_id` returned by an API) that can be used later in receiver assertions.
+- [ ] **Async API Execution**: The `/run` API endpoint currently blocks until the test finishes. Implement an async mode (returning a tracking ID immediately) and make this behavior configurable per test.
+- [ ] **Redis Data Cleanup**: Evaluate whether to explicitly delete test data and reservations from Redis immediately after a test finishes, instead of strictly relying on the key TTL expiration.
+
+---
+
 ## Historial de Cambios
 
-- **[2026-04-25]:** Step 12 — Main Wiring. Implementado `cmd/server/main.go` atando toda la arquitectura Hexagonal. Inicia el servidor Webhook, API y Cron concurrencialmente con `errgroup` y maneja el cierre limpio (*graceful shutdown*).
+- **[2026-04-26]:** Step 13 — Debugging & Refinement. Added initialization logs to HTTP and Webhook servers. Improved `HTTPTrigger` to dynamically support `application/x-www-form-urlencoded` and `application/json` payloads based on headers. Updated `TwilioExtractor` to dynamically extract messages from both JSON and URL-encoded forms depending on the Content-Type. Fixed `run_id` extraction logic.
+- **[2026-04-25]:** Step 12 — Main Wiring. Implemented `cmd/server/main.go` wiring the Hexagonal architecture. Started Webhook, API, and Cron servers concurrently with `errgroup` and handled graceful shutdown.
 - **[2026-04-25]:** Step 11 — Config & YAML Loader. Implementado parser de configuración y de definiciones de tests usando `gopkg.in/yaml.v3`, con resolución automática de variables de entorno (`{{env.VAR_NAME}}`).
 - **[2026-04-25]:** Step 10 — Cron Scheduler. Implementado `Scheduler` usando `robfig/cron/v3` para desencadenar la ejecución automática de los tests definidos en YAML según su cronograma.
 - **[2026-04-25]:** Step 9 — HTTP API Server. Implementado servidor HTTP primario para desencadenar tests manualmente (`/run`), chequear salud (`/health`) y ver resultados (`/results`).

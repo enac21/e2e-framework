@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -34,6 +35,7 @@ func NewServer(port int, store ports.Store) *Server {
 }
 
 func (s *Server) RegisterExtractor(path string, ext Extractor) {
+	log.Printf("[Webhook API] Registered endpoint: POST /webhook/%s", path)
 	s.extractors[path] = ext
 }
 
