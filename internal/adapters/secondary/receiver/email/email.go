@@ -14,7 +14,7 @@ type EmailReceiver struct {
 	runID string
 }
 
-func NewEmailReceiver(store ports.Store) ports.Receiver {
+func NewEmailReceiver(store ports.Store) *EmailReceiver {
 	return &EmailReceiver{
 		store: store,
 	}

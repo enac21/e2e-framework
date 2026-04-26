@@ -14,7 +14,7 @@ type SmsReceiver struct {
 	runID string
 }
 
-func NewSmsReceiver(store ports.Store) ports.Receiver {
+func NewSmsReceiver(store ports.Store) *SmsReceiver {
 	return &SmsReceiver{
 		store: store,
 	}

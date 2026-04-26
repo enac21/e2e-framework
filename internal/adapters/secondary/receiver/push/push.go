@@ -14,7 +14,7 @@ type PushReceiver struct {
 	runID string
 }
 
-func NewPushReceiver(store ports.Store) ports.Receiver {
+func NewPushReceiver(store ports.Store) *PushReceiver {
 	return &PushReceiver{
 		store: store,
 	}

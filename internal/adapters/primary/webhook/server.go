@@ -13,7 +13,7 @@ import (
 type Server struct {
 	httpServer *http.Server
 	store      ports.Store
-	extractors map[string]Extractor
+	extractors map[string]ports.Extractor
 }
 
 func NewServer(port int, store ports.Store) *Server {
@@ -21,7 +21,7 @@ func NewServer(port int, store ports.Store) *Server {
 
 	s := &Server{
 		store:      store,
-		extractors: make(map[string]Extractor),
+		extractors: make(map[string]ports.Extractor),
 	}
 
 	mux.HandleFunc("/webhook/", s.handleWebhook)
@@ -34,7 +34,7 @@ func NewServer(port int, store ports.Store) *Server {
 	return s
 }
 
-func (s *Server) RegisterExtractor(path string, ext Extractor) {
+func (s *Server) RegisterExtractor(path string, ext ports.Extractor) {
 	log.Printf("[Webhook API] Registered endpoint: POST /webhook/%s", path)
 	s.extractors[path] = ext
 }

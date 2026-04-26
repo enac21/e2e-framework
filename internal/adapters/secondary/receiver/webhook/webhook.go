@@ -14,7 +14,7 @@ type WebhookReceiver struct {
 	runID string
 }
 
-func NewWebhookReceiver(store ports.Store) ports.Receiver {
+func NewWebhookReceiver(store ports.Store) *WebhookReceiver {
 	return &WebhookReceiver{
 		store: store,
 	}

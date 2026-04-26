@@ -1,58 +1,41 @@
 package webhook
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
+	"log"
 	"net/http"
 	"time"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/httputil"
 )
 
 type MetaExtractor struct{}
 
-func NewMetaExtractor() Extractor {
+func NewMetaExtractor() *MetaExtractor {
 	return &MetaExtractor{}
 }
 
 func (e *MetaExtractor) Extract(req *http.Request) (*domain.Message, error) {
-	body, err := io.ReadAll(req.Body)
+	fields, raw, err := httputil.ExtractFields(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read meta body: %w", err)
-	}
-	defer req.Body.Close()
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("invalid json: %w", err)
+		return nil, err
 	}
 
-	// Simplified logic for MVP. Assume WhatsApp or Messenger JSON struct
-	// e.g. entry[0].changes[0].value.messages[0].text.body
-	
-	msg := &domain.Message{
-		RunID:        "unknown", // To be extracted from body
+	log.Printf("[Meta Webhook] Extracted fields: %v", fields)
+
+	runID := fields["messages.0.text.body"]
+	if runID == "" {
+		runID = "unknown"
+	}
+
+	return &domain.Message{
+		RunID:        runID,
 		ReceiverType: "push",
 		ReceivedAt:   time.Now(),
-		Headers:      make(map[string]string),
-		Fields:       make(map[string]string),
-		Raw:          body,
-	}
-
-	if msgList, ok := payload["messages"].([]any); ok && len(msgList) > 0 {
-		if firstMsg, ok := msgList[0].(map[string]any); ok {
-			if textObj, ok := firstMsg["text"].(map[string]any); ok {
-				if bodyText, ok := textObj["body"].(string); ok {
-					msg.Fields["body"] = bodyText
-					// If the body contains the runID
-					if len(bodyText) >= 19 && bodyText[:3] == "ID:" {
-						msg.RunID = bodyText[3:19]
-					}
-				}
-			}
-		}
-	}
-
-	return msg, nil
+		Headers: map[string]string{
+			"content-type": req.Header.Get("Content-Type"),
+		},
+		Fields: fields,
+		Raw:    raw,
+	}, nil
 }

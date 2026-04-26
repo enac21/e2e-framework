@@ -166,6 +166,7 @@ Required environment variables:
 
 ## Historial de Cambios
 
+- **[2026-04-26]:** Step 14 — Architecture Cleanup. Moved `Extractor` interface from `adapters/primary/webhook` to `internal/core/ports`. Created `internal/pkg/httputil/payload.go` with a generic payload extractor that transparently supports `application/json` and `application/x-www-form-urlencoded`, flattening nested JSON fields. Refactored `TwilioExtractor` and `MetaExtractor` to delegate all parsing to the shared helper.
 - **[2026-04-26]:** Step 13 — Debugging & Refinement. Added initialization logs to HTTP and Webhook servers. Improved `HTTPTrigger` to dynamically support `application/x-www-form-urlencoded` and `application/json` payloads based on headers. Updated `TwilioExtractor` to dynamically extract messages from both JSON and URL-encoded forms depending on the Content-Type. Fixed `run_id` extraction logic.
 - **[2026-04-25]:** Step 12 — Main Wiring. Implemented `cmd/server/main.go` wiring the Hexagonal architecture. Started Webhook, API, and Cron servers concurrently with `errgroup` and handled graceful shutdown.
 - **[2026-04-25]:** Step 11 — Config & YAML Loader. Implementado parser de configuración y de definiciones de tests usando `gopkg.in/yaml.v3`, con resolución automática de variables de entorno (`{{env.VAR_NAME}}`).
