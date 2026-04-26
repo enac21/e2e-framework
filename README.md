@@ -95,9 +95,10 @@ make docker-down
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Liveness check |
-| `POST` | `/run-test?id={test_id}` | Trigger a specific test |
-| `GET` | `/results` | Last N test results |
+| `GET`  | `/health` | Liveness check |
+| `POST` | `/run?id={test_id}` | Trigger a specific test (sync or async depending on YAML) |
+| `GET`  | `/results` | All stored test results (last 100) |
+| `GET`  | `/results/{run_id}` | Result for a specific run (supports polling for async) |
 
 ---
 
@@ -112,6 +113,7 @@ description: "Description of what this test verifies"
 
 schedule: "*/5 * * * *"
 enabled: true
+async: false
 
 trigger:
   method: POST
@@ -121,14 +123,27 @@ trigger:
     Content-Type: application/json
   body:
     message_id: "{{run_id}}"
+  extract:
+    transaction_id: "data.id"
 
 receivers:
   - type: email
     timeout: 30s
+    recipient: "test@gmail.com"
     assertions:
       - type: contains
-        field: subject
-        value: "Expected subject"
+        field: body
+        value: "Expected text"
+      - type: equals
+        field: transaction_id
+        value: "{{transaction_id}}"
+
+on_failure:
+  webhook:
+    url: "https://hooks.slack.com/services/XXX"
+    method: POST
+    body:
+      text: "🚨 Test {{test_id}} failed: {{error}}"
 ```
 
 See `tests/example_welcome_email.yaml` for a complete example.
@@ -158,26 +173,13 @@ Required environment variables:
 
 ## Roadmap / Pending Tasks
 
-- [ ] **Trigger Data Extraction**: Add the ability to parse the response body of the initial HTTP Trigger to save/extract variables (e.g., a `transaction_id` returned by an API) that can be used later in receiver assertions.
-- [ ] **Async API Execution**: The `/run` API endpoint currently blocks until the test finishes. Implement an async mode (returning a tracking ID immediately) and make this behavior configurable per test.
-- [ ] **Redis Data Cleanup**: Evaluate whether to explicitly delete test data and reservations from Redis immediately after a test finishes, instead of strictly relying on the key TTL expiration.
-- [ ] **Recipient Reservation (Concurrency Protection)**: Wire the existing `Store.Reserve` / `Store.Release` atomic operations into the Orchestrator lifecycle. This prevents race conditions when multiple concurrent test runs listen for messages on the same channel/recipient (e.g., two runs both waiting for an SMS to `+34666123456`). Requires adding recipient information to the YAML test definition.
+- [x] **Trigger Data Extraction**: `TriggerConfig.Extract` map (dot-notation paths). `HTTPTrigger.Execute` now returns `map[string]string` of extracted values. `TestResult.TriggerVars` exposes them.
+- [x] **Async API Execution**: `TestDefinition.Async` flag. `/run` returns `202 Accepted` with `run_id` immediately. New `GET /results/{run_id}` polling endpoint. Added `StatusRunning`.
+- [x] **Redis Data Cleanup**: `ports.Store.Delete` added. Orchestrator calls `Delete` after each receiver successfully collects its message.
+- [x] **Recipient Reservation (Concurrency Protection)**: `ReceiverConfig.Recipient` field. Orchestrator calls `Reserve` before starting each receiver and `Release` in the deferred cleanup.
 
 ---
 
-## Historial de Cambios
+## Changelog
 
-- **[2026-04-26]:** Step 14 — Architecture Cleanup. Moved `Extractor` interface from `adapters/primary/webhook` to `internal/core/ports`. Created `internal/pkg/httputil/payload.go` with a generic payload extractor that transparently supports `application/json` and `application/x-www-form-urlencoded`, flattening nested JSON fields. Refactored `TwilioExtractor` and `MetaExtractor` to delegate all parsing to the shared helper.
-- **[2026-04-26]:** Step 13 — Debugging & Refinement. Added initialization logs to HTTP and Webhook servers. Improved `HTTPTrigger` to dynamically support `application/x-www-form-urlencoded` and `application/json` payloads based on headers. Updated `TwilioExtractor` to dynamically extract messages from both JSON and URL-encoded forms depending on the Content-Type. Fixed `run_id` extraction logic.
-- **[2026-04-25]:** Step 12 — Main Wiring. Implemented `cmd/server/main.go` wiring the Hexagonal architecture. Started Webhook, API, and Cron servers concurrently with `errgroup` and handled graceful shutdown.
-- **[2026-04-25]:** Step 11 — Config & YAML Loader. Implementado parser de configuración y de definiciones de tests usando `gopkg.in/yaml.v3`, con resolución automática de variables de entorno (`{{env.VAR_NAME}}`).
-- **[2026-04-25]:** Step 10 — Cron Scheduler. Implementado `Scheduler` usando `robfig/cron/v3` para desencadenar la ejecución automática de los tests definidos en YAML según su cronograma.
-- **[2026-04-25]:** Step 9 — HTTP API Server. Implementado servidor HTTP primario para desencadenar tests manualmente (`/run`), chequear salud (`/health`) y ver resultados (`/results`).
-- **[2026-04-25]:** Step 8 — Webhook Server. Implementado servidor HTTP primario para recibir webhooks entrantes (Twilio, Meta) y depositarlos en el Redis `Store`.
-- **[2026-04-25]:** Step 7 — Orchestrator. Implementado `Orchestrator` que une todos los puertos. Maneja ciclo de vida del test, ejecución concurrente de receivers con `sync.WaitGroup`, agregación de resultados y llamadas al Notifier.
-- **[2026-04-25]:** Step 6 — Receiver Adapters. Implementado `ReceiverRegistry` usando patrón factory y 4 receivers (`webhook`, `sms`, `push`, `email`) que hacen polling del `Store` usando un Ticker.
-- **[2026-04-25]:** Step 5 — Trigger & Notifier Adapters. Implementados `HTTPTrigger` y `WebhookNotifier` usando un helper nuevo `pkg/template` para el reemplazo recursivo de variables (`{{run_id}}`, etc.).
-- **[2026-04-25]:** Step 4 — Assertion Adapters. Implementados 5 assertions (`contains`, `equals`, `matches`, `present`, `not_contains`) y `AssertionRegistry` con patrón factory.
-- **[2026-04-25]:** Step 3 — Store Adapter (Redis). Implementado `RedisStore` con `Deposit`, `Claim`, `Reserve` (SetNX atómico), `Release`. Dependencia `go-redis/v9`.
-- **[2026-04-25]:** Step 2 — Core Domain. Implemented all domain types (`Message`, `TestResult`, `RunStatus`, `TestDefinition` and sub-types) and all five port interfaces (`Trigger`, `Receiver`, `Assertion`, `Store`, `Notifier`) with full godoc comments. Zero adapter imports in `core/`.
-- **[2026-04-25]:** Step 1 — Project Skeleton. Created full directory structure following hexagonal architecture, all placeholder Go files with package declarations and responsibility comments, `Makefile`, `Dockerfile`, `docker-compose.yml`, `configs/config.yaml`, `tests/example_welcome_email.yaml`, `CONTRIBUTING.md`, `CHANGES.md`, and `README.md`.
+See [CHANGES.md](CHANGES.md) for the full history of changes.

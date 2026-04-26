@@ -11,6 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const e2eTestKey = "e2e-test:%s:%s"
+
 type RedisStoreConfig struct {
 	URL string
 	TTL time.Duration
@@ -44,7 +46,7 @@ func (s *RedisStore) Deposit(ctx context.Context, msg *domain.Message) error {
 }
 
 func (s *RedisStore) Claim(ctx context.Context, runID string, receiverType string) (*domain.Message, error) {
-	key := fmt.Sprintf("store:messages:%s:%s", runID, receiverType)
+	key := fmt.Sprintf(e2eTestKey, runID, receiverType)
 
 	data, err := s.client.Get(ctx, key).Bytes()
 	if err == redis.Nil {
@@ -80,6 +82,11 @@ func (s *RedisStore) Reserve(ctx context.Context, channel string, recipient stri
 
 func (s *RedisStore) Release(ctx context.Context, channel string, recipient string) error {
 	key := fmt.Sprintf("store:reservations:%s:%s", channel, recipient)
+	return s.client.Del(ctx, key).Err()
+}
+
+func (s *RedisStore) Delete(ctx context.Context, runID string, receiverType string) error {
+	key := fmt.Sprintf(e2eTestKey, runID, receiverType)
 	return s.client.Del(ctx, key).Err()
 }
 

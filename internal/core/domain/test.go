@@ -8,6 +8,7 @@ type TestDefinition struct {
 	Description string           `yaml:"description"`
 	Schedule    string           `yaml:"schedule"`
 	Enabled     bool             `yaml:"enabled"`
+	Async       bool             `yaml:"async"`
 	Retry       RetryConfig      `yaml:"retry"`
 	Trigger     TriggerConfig    `yaml:"trigger"`
 	Receivers   []ReceiverConfig `yaml:"receivers"`
@@ -26,11 +27,13 @@ type TriggerConfig struct {
 	Timeout time.Duration     `yaml:"timeout"`
 	Headers map[string]string `yaml:"headers"`
 	Body    map[string]any    `yaml:"body"`
+	Extract map[string]string `yaml:"extract"`
 }
 
 type ReceiverConfig struct {
 	Type       string            `yaml:"type"`
 	Timeout    time.Duration     `yaml:"timeout"`
+	Recipient  string            `yaml:"recipient"`
 	Assertions []AssertionConfig `yaml:"assertions"`
 }
 

@@ -29,9 +29,8 @@ func (s *Scheduler) RegisterTest(def domain.TestDefinition) error {
 	}
 
 	_, err := s.cron.AddFunc(def.Schedule, func() {
-		// Orchestrator handles panic recovery internally or via defers
-		// For MVP, background context is used.
-		_ = s.orchestrator.RunTest(context.Background(), def)
+		_, resultCh := s.orchestrator.RunTest(context.Background(), def)
+		<-resultCh
 	})
 
 	if err != nil {

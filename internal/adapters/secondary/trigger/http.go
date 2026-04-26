@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/httputil"
 	"e2e-framework/internal/pkg/template"
 )
 
@@ -24,7 +25,7 @@ func NewHTTPTrigger() *HTTPTrigger {
 	}
 }
 
-func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, runID string) error {
+func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, runID string) (map[string]string, error) {
 	vars := map[string]string{
 		"run_id": runID,
 	}
@@ -59,7 +60,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 		} else {
 			b, err := json.Marshal(bodyMap)
 			if err != nil {
-				return fmt.Errorf("failed to serialize trigger body: %w", err)
+				return nil, fmt.Errorf("failed to serialize trigger body: %w", err)
 			}
 			reqBody = bytes.NewReader(b)
 		}
@@ -74,7 +75,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	req, err := http.NewRequestWithContext(reqCtx, method, targetURL, reqBody)
 	if err != nil {
-		return fmt.Errorf("failed to create trigger request: %w", err)
+		return nil, fmt.Errorf("failed to create trigger request: %w", err)
 	}
 
 	for k, v := range headers {
@@ -83,14 +84,37 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("trigger HTTP request failed: %w", err)
+		return nil, fmt.Errorf("trigger HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("trigger returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("trigger returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	return nil
+	if len(def.Extract) == 0 {
+		return map[string]string{}, nil
+	}
+
+	rawResp, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read trigger response body: %w", err)
+	}
+
+	var respPayload map[string]any
+	if err := json.Unmarshal(rawResp, &respPayload); err != nil {
+		return nil, fmt.Errorf("failed to parse trigger response as JSON: %w", err)
+	}
+
+	flatResp := httputil.FlattenJSON(respPayload)
+
+	extracted := make(map[string]string, len(def.Extract))
+	for varName, jsonPath := range def.Extract {
+		if val, ok := flatResp[strings.ToLower(jsonPath)]; ok {
+			extracted[varName] = val
+		}
+	}
+
+	return extracted, nil
 }

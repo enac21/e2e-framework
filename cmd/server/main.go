@@ -69,7 +69,13 @@ func main() {
 	receiverReg.Register("email", func() ports.Receiver { return email.NewEmailReceiver(redisStore) })
 
 	// Core Orchestrator
-	orchestrator := services.NewOrchestrator(httpTrigger, receiverReg, assertionReg, webhookNotifier)
+	orchestrator := services.NewOrchestrator(
+		httpTrigger,
+		redisStore,
+		receiverReg,
+		assertionReg,
+		webhookNotifier,
+	)
 
 	// Setup primary adapters
 	apiServer := api.NewServer(cfg.Server.Port, orchestrator, tests)

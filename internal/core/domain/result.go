@@ -2,13 +2,14 @@ package domain
 
 import "time"
 
-type RunStatus string
+type RunStatus = string
 
 const (
 	StatusPassed  RunStatus = "passed"
 	StatusFailed  RunStatus = "failed"
 	StatusError   RunStatus = "error"
 	StatusSkipped RunStatus = "skipped"
+	StatusRunning RunStatus = "running"
 )
 
 type ReceiverResult struct {
@@ -20,12 +21,13 @@ type ReceiverResult struct {
 }
 
 type TestResult struct {
-	TestID     string
-	RunID      string
-	Status     RunStatus
-	DurationMs int64
-	Receivers  []ReceiverResult
-	Error      string
-	StartedAt  time.Time
-	FinishedAt time.Time
+	TestID      string
+	RunID       string
+	Status      RunStatus
+	DurationMs  int64
+	Receivers   []ReceiverResult
+	Error       string
+	StartedAt   time.Time
+	FinishedAt  time.Time
+	TriggerVars map[string]string
 }

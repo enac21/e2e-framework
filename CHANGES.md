@@ -5,6 +5,49 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-04-26] — Step 16: Orchestrator RunID Ownership & Refactoring
+
+- `Orchestrator.RunTest` now generates the RunID internally and returns `(string, <-chan *domain.TestResult)` immediately, launching execution asynchronously.
+- Removed `runID` parameter from `RunTest` — the core is now the sole owner of execution identity.
+- HTTP server and Cron scheduler no longer generate IDs; they receive the runID from the Orchestrator and decide whether to block on the channel (sync) or not (async).
+- Fixed async mode bug: placeholder and final result now share the same RunID key, making polling correct.
+- `def.Async` moves to an adapter concern: the HTTP handler decides to wait on the channel or not.
+- Removed `generateRunID` helper from HTTP adapter.
+- Removed unused `time` and `fmt` imports from `cron/scheduler.go`.
+- All constructors for `Receiver` adapters (`NewSmsReceiver`, `NewWebhookReceiver`, `NewPushReceiver`, `NewEmailReceiver`) now return concrete types instead of `ports.Receiver`.
+- `Extractor` interface moved from `adapters/primary/webhook` to `internal/core/ports/extractor.go`.
+
+---
+
+## [2026-04-26] — Step 15: Roadmap Implementation
+
+- **Trigger Data Extraction**: Added `Extract map[string]string` to `domain.TriggerConfig`. `HTTPTrigger.Execute` now returns `(map[string]string, error)`, reading response JSON and extracting values by dot-notation path. `TestResult.TriggerVars` exposes extracted values. `httputil.FlattenJSON` exported for reuse.
+- **Async API Execution**: Added `Async bool` to `domain.TestDefinition`. `/run` returns `202 Accepted` with `run_id` and `poll_at` for async tests. New `GET /results/{run_id}` polling endpoint. Added `StatusRunning` to `domain.RunStatus`.
+- **Redis Data Cleanup**: Added `Delete` to `ports.Store` interface and implemented in `RedisStore`. Orchestrator calls `Delete` after each receiver successfully collects its message, removing the key immediately instead of relying only on TTL.
+- **Recipient Reservation**: Added `Recipient string` to `domain.ReceiverConfig`. Orchestrator calls `store.Reserve` before starting each receiver (if `recipient` is non-empty) and `store.Release` in the deferred cleanup. Prevents concurrent runs from claiming the same channel/recipient.
+- Removed legacy `handler_run.go`, `handler_results.go`, `handler_health.go` — all HTTP handler logic consolidated in `server.go`.
+- Results store in HTTP server refactored from `[]*TestResult` slice to `map[string]*TestResult` for O(1) lookup by `run_id`.
+
+---
+
+## [2026-04-26] — Step 14: Architecture Cleanup
+
+- Moved `Extractor` interface from `adapters/primary/webhook/extractor.go` to `internal/core/ports/extractor.go`.
+- Created `internal/pkg/httputil/payload.go` with `ExtractFields` generic utility: transparently handles `application/json` (with recursive `flattenMap` for nested keys) and `application/x-www-form-urlencoded` (with lowercase key normalization).
+- Refactored `TwilioExtractor` and `MetaExtractor` to delegate all payload parsing to `httputil.ExtractFields`.
+- `TwilioExtractor` now extracts `runID` as `strings.TrimSpace(fields["body"])` — no prefix parsing.
+- `RedisStore` key format unified under `e2eTestKey` constant (`"e2e-test:%s:%s"`).
+
+---
+
+## [2026-04-26] — Step 13: Debugging & Refinement
+
+- Added initialization logs to HTTP API server and Webhook server on startup.
+- `HTTPTrigger` updated to detect `Content-Type` header and serialize body as `application/x-www-form-urlencoded` or `application/json` accordingly.
+- Fixed `run_id` extraction in `TwilioExtractor`: removed prefix-based substring logic; `Body` field is now used directly as the `runID`.
+
+---
+
 ## [2026-04-25] — Step 12: Main Wiring & Graceful Shutdown
 
 - Implemented `cmd/server/main.go` using `golang.org/x/sync/errgroup` to run all primary adapters concurrently

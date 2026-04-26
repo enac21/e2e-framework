@@ -48,6 +48,10 @@ func extractForm(req *http.Request) (map[string]string, []byte, error) {
 	return fields, raw, nil
 }
 
+func FlattenJSON(m map[string]any) map[string]string {
+	return flattenMap("", m)
+}
+
 func flattenMap(prefix string, m map[string]any) map[string]string {
 	result := make(map[string]string)
 	for k, v := range m {

@@ -50,29 +50,33 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	// path looks like /webhook/{provider}
+	ctx := context.WithoutCancel(r.Context())
+
 	provider := r.URL.Path[len("/webhook/"):]
 
 	extractor, exists := s.extractors[provider]
 	if !exists {
 		http.Error(w, "unknown provider", http.StatusNotFound)
+
 		return
 	}
 
 	msg, err := extractor.Extract(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+
 		return
 	}
 
 	if msg.RunID == "" || msg.RunID == "unknown" {
-		// Log error but return 200 OK to the provider so they don't retry
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusBadRequest)
+
 		return
 	}
 
-	if err := s.store.Deposit(r.Context(), msg); err != nil {
+	if err := s.store.Deposit(ctx, msg); err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
+
 		return
 	}
 

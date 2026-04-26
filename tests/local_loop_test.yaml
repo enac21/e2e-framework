@@ -1,7 +1,8 @@
 version: "1"
 id: local_loop_test
-description: "A self-contained test that triggers an HTTP request to our own Webhook server and verifies that our own SMS receiver processes it successfully."
+description: "Self-contained smoke test. Triggers our own Webhook server and verifies the SMS receiver picks it up correctly."
 enabled: true
+async: false
 
 trigger:
   method: POST
@@ -12,7 +13,6 @@ trigger:
   body:
     From: "+123456"
     To: "+987654"
-    # The twilio extractor we built expects the run_id in the body like "ID: <run_id>"
     Body: "{{run_id}}"
 
 receivers:
