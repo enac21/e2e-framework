@@ -53,7 +53,7 @@ func (s *Server) Stop() error {
 // @Summary Receive webhook from provider
 // @Description Deposit messages from providers into the store
 // @Tags Webhooks
-// @Param provider path string true "Provider name (e.g., github, gitlab)"
+// @Param provider path string true "Provider name (e.g., twilio, meta)"
 // @Produce json
 // @Success 202
 // @Failure 404 {string} string "Unknown provider"
