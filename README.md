@@ -163,6 +163,12 @@ on_failure:
       text: "🚨 Test {{test_id}} failed: {{error}}"
 ```
 
+### Dynamic Variables
+
+You can dynamically inject values across your test definition using the `{{variable_name}}` syntax:
+- `{{run_id}}`: Injected automatically by the Orchestrator. It's the unique UUID for the current test run.
+- **Trigger Extraction**: If your trigger hits an API that returns JSON, you can use the `extract` block to map JSON paths (using dot-notation, like `data.id`) to variable names (like `transaction_id`). You can then use these variables in your assertions (e.g., `value: "{{transaction_id}}"`) to validate dynamic runtime data.
+
 See `tests/example_welcome_email.yaml` for a complete example.
 
 ---

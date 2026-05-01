@@ -41,7 +41,8 @@ func (s *RedisStore) Deposit(ctx context.Context, msg *domain.Message) error {
 		return fmt.Errorf("failed to serialize message: %w", err)
 	}
 
-	key := fmt.Sprintf("store:messages:%s:%s", msg.RunID, msg.ReceiverType)
+	key := fmt.Sprintf(e2eTestKey, msg.RunID, msg.ReceiverType)
+
 	return s.client.Set(ctx, key, data, s.ttl).Err()
 }
 
@@ -50,9 +51,10 @@ func (s *RedisStore) Claim(ctx context.Context, runID string, receiverType strin
 
 	data, err := s.client.Get(ctx, key).Bytes()
 	if err == redis.Nil {
-		return nil, nil
-	}
-	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+
 		return nil, fmt.Errorf("failed to claim message: %w", err)
 	}
 
@@ -74,6 +76,7 @@ func (s *RedisStore) Reserve(ctx context.Context, channel string, recipient stri
 
 	if !ok {
 		existingRunID, _ := s.client.Get(ctx, key).Result()
+
 		return fmt.Errorf("recipient %s:%s already reserved by run %s", channel, recipient, existingRunID)
 	}
 
@@ -82,11 +85,13 @@ func (s *RedisStore) Reserve(ctx context.Context, channel string, recipient stri
 
 func (s *RedisStore) Release(ctx context.Context, channel string, recipient string) error {
 	key := fmt.Sprintf("store:reservations:%s:%s", channel, recipient)
+
 	return s.client.Del(ctx, key).Err()
 }
 
 func (s *RedisStore) Delete(ctx context.Context, runID string, receiverType string) error {
 	key := fmt.Sprintf(e2eTestKey, runID, receiverType)
+
 	return s.client.Del(ctx, key).Err()
 }
 

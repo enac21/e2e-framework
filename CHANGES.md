@@ -5,6 +5,15 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-05-01] — Step 18: Variable Injection in Assertions (Production Readiness Phase 1)
+
+- **Variable Injection (Bug Fix)**: The Orchestrator now correctly injects dynamically extracted trigger variables into test assertions.
+- Updated `collectAndAssert` in `internal/core/services/orchestrator.go` to accept `triggerVars map[string]string`.
+- Used `template.ReplaceString` to evaluate variables (e.g., `{{transaction_id}}`) inside `AssertionConfig.Field` and `AssertionConfig.Value` right before creating the assertion instance.
+- This unlocks the ability to assert values that are generated at runtime by the external systems being tested.
+
+---
+
 ## [2026-04-26] — Step 17: Swagger Documentation
 
 - Added Swagger annotations to `cmd/server/main.go` for general API information.

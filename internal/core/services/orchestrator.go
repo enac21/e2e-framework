@@ -10,6 +10,7 @@ import (
 	"e2e-framework/internal/adapters/secondary/receiver"
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
+	"e2e-framework/internal/pkg/template"
 )
 
 type Orchestrator struct {
@@ -62,6 +63,7 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 		result.Status = domain.StatusSkipped
 		result.FinishedAt = time.Now()
 		result.DurationMs = result.FinishedAt.Sub(startTime).Milliseconds()
+
 		return result
 	}
 
@@ -83,6 +85,7 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 		if rcfg.Recipient != "" {
 			if err := o.store.Reserve(ctx, rcfg.Type, rcfg.Recipient, runID); err != nil {
 				o.failResult(result, fmt.Sprintf("recipient reservation failed for %s: %v", rcfg.Type, err))
+
 				return result
 			}
 		}
@@ -90,11 +93,13 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 		instance, err := o.receivers.Create(rcfg.Type)
 		if err != nil {
 			o.failResult(result, fmt.Sprintf("failed to create receiver %s: %v", rcfg.Type, err))
+
 			return result
 		}
 
 		if err := instance.Start(ctx, runID); err != nil {
 			o.failResult(result, fmt.Sprintf("failed to start receiver %s: %v", rcfg.Type, err))
+
 			return result
 		}
 
@@ -108,8 +113,10 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 	if err != nil {
 		o.failResult(result, fmt.Sprintf("trigger failed: %v", err))
 		o.notifyFailure(ctx, def.OnFailure, result)
+
 		return result
 	}
+
 	result.TriggerVars = triggerVars
 
 	var wg sync.WaitGroup
@@ -117,19 +124,24 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 
 	for _, r := range activeReceivers {
 		wg.Add(1)
+
 		go func(rcfg domain.ReceiverConfig, instance ports.Receiver) {
 			defer wg.Done()
+
 			rcvStart := time.Now()
-			rcvResult := o.collectAndAssert(ctx, runID, rcfg, instance)
+			rcvResult := o.collectAndAssert(ctx, runID, rcfg, instance, triggerVars)
 			rcvResult.DurationMs = time.Since(rcvStart).Milliseconds()
 
 			mu.Lock()
+
 			result.Receivers = append(result.Receivers, rcvResult)
+
 			if rcvResult.Status == domain.StatusError && result.Status != domain.StatusError {
 				result.Status = domain.StatusError
 			} else if rcvResult.Status == domain.StatusFailed && result.Status == domain.StatusPassed {
 				result.Status = domain.StatusFailed
 			}
+
 			mu.Unlock()
 		}(r.cfg, r.instance)
 	}
@@ -146,7 +158,13 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 	return result
 }
 
-func (o *Orchestrator) collectAndAssert(ctx context.Context, runID string, rcfg domain.ReceiverConfig, instance ports.Receiver) domain.ReceiverResult {
+func (o *Orchestrator) collectAndAssert(
+	ctx context.Context,
+	runID string,
+	rcfg domain.ReceiverConfig,
+	instance ports.Receiver,
+	triggerVars map[string]string,
+) domain.ReceiverResult {
 	res := domain.ReceiverResult{
 		Type:   rcfg.Type,
 		Status: domain.StatusPassed,
@@ -171,6 +189,9 @@ func (o *Orchestrator) collectAndAssert(ctx context.Context, runID string, rcfg 
 	res.Message = msg
 
 	for _, acfg := range rcfg.Assertions {
+		acfg.Field = template.ReplaceString(acfg.Field, triggerVars)
+		acfg.Value = template.ReplaceString(acfg.Value, triggerVars)
+
 		assertion, err := o.assertions.Create(acfg)
 		if err != nil {
 			res.Status = domain.StatusError
