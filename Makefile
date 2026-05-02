@@ -1,3 +1,5 @@
+# NOTE: mingw32-make in windows
+
 .PHONY: build run test test-integration lint clean docker-build docker-up docker-down
 
 # Binary output name
@@ -21,11 +23,7 @@ test-integration:
 
 # Run linter
 lint:
-	go vet ./...
-
-# Clean build artifacts
-clean:
-	rm -rf bin/
+	go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run
 
 # Build Docker image
 docker-build:

@@ -1,0 +1,25 @@
+linters-settings:
+  govet:
+    disable:
+      - fieldalignment
+      - shadow
+  errcheck:
+    check-type-assertions: true
+    check-blank: false
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - whitespace
+    - gofmt
+    - goimports
+    - misspell
+
+issues:
+  exclude-use-default: true

@@ -55,32 +55,34 @@ func (n *WebhookNotifier) Notify(ctx context.Context, cfg domain.OnFailureConfig
 		bodyMap := template.ReplaceMap(action.Body, vars)
 		b, err := json.Marshal(bodyMap)
 		if err != nil {
-			return fmt.Errorf("failed to serialize notifier body: %w", err)
+			return fmt.Errorf("%w: failed to serialize notifier body: %v", domain.ErrInternal, err)
 		}
 		reqBody = bytes.NewReader(b)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
-		return fmt.Errorf("failed to create notifier request: %w", err)
+		return fmt.Errorf("%w: failed to create notifier request: %v", domain.ErrInternal, err)
 	}
 
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+
 	if req.Header.Get("Content-Type") == "" && reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("notifier HTTP request failed: %w", err)
+		return fmt.Errorf("%w: notifier HTTP request failed: %v", domain.ErrInternal, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("notifier returned status %d: %s", resp.StatusCode, string(respBody))
+
+		return fmt.Errorf("%w: notifier returned status %d: %s", domain.ErrInternal, resp.StatusCode, string(respBody))
 	}
 
 	return nil

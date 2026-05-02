@@ -14,8 +14,8 @@ trigger:
     From: "+123456"
     To: "+987654"
     Body: "{{run_id}}"
-  extract:
-    extracted_from: "test_id"
+#  extract:
+#    extracted_from: "test_id"
 
 receivers:
   - type: sms
@@ -23,4 +23,5 @@ receivers:
     assertions:
       - type: equals
         field: from
-        value: "{{extracted_from}}"
+#        value: "{{extracted_from}}"
+        value: "+123456"

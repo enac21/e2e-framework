@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"e2e-framework/internal/core/domain"
 )
 
 func ExtractFields(req *http.Request) (map[string]string, []byte, error) {
@@ -21,22 +23,26 @@ func ExtractFields(req *http.Request) (map[string]string, []byte, error) {
 func extractJSON(req *http.Request) (map[string]string, []byte, error) {
 	raw, err := io.ReadAll(req.Body)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read request body: %w", err)
+		return nil, nil, fmt.Errorf("%w: failed to read request body: %v", domain.ErrInternal, err)
 	}
-	defer req.Body.Close()
+
+	if req.Body != nil {
+		defer req.Body.Close()
+	}
 
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse JSON payload: %w", err)
+		return nil, nil, fmt.Errorf("%w: failed to parse JSON payload: %v", domain.ErrValidation, err)
 	}
 
 	fields := flattenMap("", payload)
+
 	return fields, raw, nil
 }
 
 func extractForm(req *http.Request) (map[string]string, []byte, error) {
 	if err := req.ParseForm(); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse form payload: %w", err)
+		return nil, nil, fmt.Errorf("%w: failed to parse form payload: %v", domain.ErrValidation, err)
 	}
 
 	fields := make(map[string]string, len(req.Form))
@@ -45,6 +51,7 @@ func extractForm(req *http.Request) (map[string]string, []byte, error) {
 	}
 
 	raw, _ := json.Marshal(fields)
+
 	return fields, raw, nil
 }
 
@@ -71,5 +78,6 @@ func flattenMap(prefix string, m map[string]any) map[string]string {
 			result[key] = fmt.Sprintf("%v", val)
 		}
 	}
+
 	return result
 }

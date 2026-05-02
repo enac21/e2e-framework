@@ -20,7 +20,8 @@ func NewPresentAssertion(cfg domain.AssertionConfig) (ports.Assertion, error) {
 func (a *PresentAssertion) Assert(msg *domain.Message) error {
 	actual, exists := msg.Fields[a.field]
 	if !exists || actual == "" {
-		return fmt.Errorf("field %q: expected to be present, but was empty or missing", a.field)
+		return fmt.Errorf("%w: field %q: expected to be present, but was empty or missing", domain.ErrValidation, a.field)
 	}
+
 	return nil
 }

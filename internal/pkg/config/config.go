@@ -6,6 +6,8 @@ import (
 	"regexp"
 
 	"gopkg.in/yaml.v3"
+
+	"e2e-framework/internal/core/domain"
 )
 
 type Config struct {
@@ -27,7 +29,7 @@ var envRegex = regexp.MustCompile(`\{\{env\.([^}]+)\}\}`)
 func LoadConfig(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("%w: failed to read config file: %v", domain.ErrConfiguration, err)
 	}
 
 	// Resolve env variables before parsing
@@ -41,7 +43,7 @@ func LoadConfig(path string) (*Config, error) {
 
 	var cfg Config
 	if err := yaml.Unmarshal([]byte(resolved), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config yaml: %w", err)
+		return nil, fmt.Errorf("%w: failed to parse config yaml: %v", domain.ErrConfiguration, err)
 	}
 
 	return &cfg, nil

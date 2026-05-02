@@ -34,7 +34,7 @@ func (s *Scheduler) RegisterTest(def domain.TestDefinition) error {
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to schedule test %s: %w", def.ID, err)
+		return fmt.Errorf("%w: failed to schedule test %s: %v", domain.ErrConfiguration, def.ID, err)
 	}
 
 	return nil

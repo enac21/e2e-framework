@@ -16,7 +16,7 @@ type MatchesAssertion struct {
 func NewMatchesAssertion(cfg domain.AssertionConfig) (ports.Assertion, error) {
 	pattern, err := regexp.Compile(cfg.Value)
 	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern %q: %w", cfg.Value, err)
+		return nil, fmt.Errorf("%w: invalid regex pattern %q: %v", domain.ErrConfiguration, cfg.Value, err)
 	}
 	return &MatchesAssertion{
 		field:   cfg.Field,
@@ -27,7 +27,8 @@ func NewMatchesAssertion(cfg domain.AssertionConfig) (ports.Assertion, error) {
 func (a *MatchesAssertion) Assert(msg *domain.Message) error {
 	actual := msg.Fields[a.field]
 	if !a.pattern.MatchString(actual) {
-		return fmt.Errorf("field %q: expected to match pattern %q, got %q", a.field, a.pattern.String(), actual)
+		return fmt.Errorf("%w: field %q: expected to match pattern %q, got %q", domain.ErrValidation, a.field, a.pattern.String(), actual)
 	}
+
 	return nil
 }

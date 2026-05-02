@@ -24,9 +24,9 @@ func (r *AssertionRegistry) Register(typeName string, factory AssertionFactory) 
 }
 
 func (r *AssertionRegistry) Create(cfg domain.AssertionConfig) (ports.Assertion, error) {
-	factory, exists := r.factories[cfg.Type]
-	if !exists {
-		return nil, fmt.Errorf("unknown assertion type: %q", cfg.Type)
+	if factory, ok := r.factories[cfg.Type]; ok {
+		return factory(cfg)
 	}
-	return factory(cfg)
+
+	return nil, fmt.Errorf("%w: unknown assertion type: %q", domain.ErrConfiguration, cfg.Type)
 }

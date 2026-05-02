@@ -60,7 +60,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 		} else {
 			b, err := json.Marshal(bodyMap)
 			if err != nil {
-				return nil, fmt.Errorf("failed to serialize trigger body: %w", err)
+				return nil, fmt.Errorf("%w: failed to serialize trigger body: %v", domain.ErrTriggerFailed, err)
 			}
 			reqBody = bytes.NewReader(b)
 		}
@@ -75,7 +75,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	req, err := http.NewRequestWithContext(reqCtx, method, targetURL, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create trigger request: %w", err)
+		return nil, fmt.Errorf("%w: failed to create trigger request: %v", domain.ErrTriggerFailed, err)
 	}
 
 	for k, v := range headers {
@@ -84,13 +84,14 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("trigger HTTP request failed: %w", err)
+		return nil, fmt.Errorf("%w: HTTP request failed: %v", domain.ErrTriggerFailed, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("trigger returned status %d: %s", resp.StatusCode, string(respBody))
+
+		return nil, fmt.Errorf("%w: returned status %d: %s", domain.ErrTriggerFailed, resp.StatusCode, string(respBody))
 	}
 
 	if len(def.Extract) == 0 {
@@ -99,12 +100,16 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	rawResp, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read trigger response body: %w", err)
+		return nil, fmt.Errorf("%w: failed to read trigger response body: %v", domain.ErrTriggerFailed, err)
+	}
+
+	if len(bytes.TrimSpace(rawResp)) == 0 {
+		return nil, fmt.Errorf("%w: extraction was configured but the trigger response body is empty", domain.ErrTriggerFailed)
 	}
 
 	var respPayload map[string]any
 	if err := json.Unmarshal(rawResp, &respPayload); err != nil {
-		return nil, fmt.Errorf("failed to parse trigger response as JSON: %w", err)
+		return nil, fmt.Errorf("%w: failed to parse trigger response as JSON: %v", domain.ErrTriggerFailed, err)
 	}
 
 	flatResp := httputil.FlattenJSON(respPayload)

@@ -5,6 +5,17 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-05-01] — Step 19: Clean Code, Linter & Domain Errors
+
+- **Coding Standards Enforcement**: Created `CODING_STANDARDS.md` documenting strict Go programming rules for the project.
+- **Domain Errors**: Created `internal/core/domain/errors.go` with predefined errors (`ErrConfiguration`, `ErrInternal`, `ErrTimeout`, `ErrTriggerFailed`, `ErrValidation`).
+- **Error Wrapping Refactor**: Refactored over 15 files across all secondary adapters to wrap domain errors (e.g. `fmt.Errorf("%w: timeout: %v", domain.ErrTimeout, err)`) instead of using flat string errors, improving traceability and enabling `errors.Is`.
+- **Error Handling Pattern**: Enforced the `if err != nil { if ... }` pattern throughout the codebase, removing nested error checks.
+- **Linter Integration**: Added `.golangci.yml` configuring `errcheck`, `govet`, `ineffassign`, `gofmt`, `goimports`, and `whitespace`.
+- **Return Formatting**: Ensured a blank line separates the final `return` statement from the preceding logic blocks across the codebase.
+
+---
+
 ## [2026-05-01] — Step 18: Variable Injection in Assertions (Production Readiness Phase 1)
 
 - **Variable Injection (Bug Fix)**: The Orchestrator now correctly injects dynamically extracted trigger variables into test assertions.

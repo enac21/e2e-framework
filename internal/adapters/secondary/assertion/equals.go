@@ -22,7 +22,8 @@ func NewEqualsAssertion(cfg domain.AssertionConfig) (ports.Assertion, error) {
 func (a *EqualsAssertion) Assert(msg *domain.Message) error {
 	actual := msg.Fields[a.field]
 	if actual != a.value {
-		return fmt.Errorf("field %q: expected %q, got %q", a.field, a.value, actual)
+		return fmt.Errorf("%w: field %q: expected %q, got %q", domain.ErrValidation, a.field, a.value, actual)
 	}
+
 	return nil
 }

@@ -12,7 +12,7 @@
 *.out
 
 # Dependency directories
-# vendor/
+vendor/
 
 # Go workspace file
 go.work
@@ -26,3 +26,4 @@ bin/
 # Editor directories and files
 .vscode/
 .idea/
+__debug* 

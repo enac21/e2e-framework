@@ -12,6 +12,7 @@ import (
 )
 
 const e2eTestKey = "e2e-test:%s:%s"
+const reservationTTL = 1 * time.Hour
 
 type RedisStoreConfig struct {
 	URL string
@@ -26,7 +27,7 @@ type RedisStore struct {
 func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 	opts, err := redis.ParseURL(cfg.URL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid redis URL: %w", err)
+		return nil, fmt.Errorf("%w: invalid redis URL: %v", domain.ErrConfiguration, err)
 	}
 
 	return &RedisStore{
@@ -38,7 +39,7 @@ func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 func (s *RedisStore) Deposit(ctx context.Context, msg *domain.Message) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("failed to serialize message: %w", err)
+		return fmt.Errorf("%w: failed to serialize message: %v", domain.ErrInternal, err)
 	}
 
 	key := fmt.Sprintf(e2eTestKey, msg.RunID, msg.ReceiverType)
@@ -50,17 +51,17 @@ func (s *RedisStore) Claim(ctx context.Context, runID string, receiverType strin
 	key := fmt.Sprintf(e2eTestKey, runID, receiverType)
 
 	data, err := s.client.Get(ctx, key).Bytes()
-	if err == redis.Nil {
+	if err != nil {
 		if err == redis.Nil {
 			return nil, nil
 		}
 
-		return nil, fmt.Errorf("failed to claim message: %w", err)
+		return nil, fmt.Errorf("%w: failed to claim message: %v", domain.ErrInternal, err)
 	}
 
 	var msg domain.Message
 	if err := json.Unmarshal(data, &msg); err != nil {
-		return nil, fmt.Errorf("failed to deserialize message: %w", err)
+		return nil, fmt.Errorf("%w: failed to deserialize message: %v", domain.ErrInternal, err)
 	}
 
 	return &msg, nil
@@ -69,15 +70,13 @@ func (s *RedisStore) Claim(ctx context.Context, runID string, receiverType strin
 func (s *RedisStore) Reserve(ctx context.Context, channel string, recipient string, runID string) error {
 	key := fmt.Sprintf("store:reservations:%s:%s", channel, recipient)
 
-	ok, err := s.client.SetNX(ctx, key, runID, s.ttl).Result()
-	if err != nil {
-		return fmt.Errorf("failed to reserve %s:%s: %w", channel, recipient, err)
-	}
-
-	if !ok {
+	err := s.client.SetArgs(ctx, key, runID, redis.SetArgs{Mode: "NX", TTL: reservationTTL}).Err()
+	if err == redis.Nil {
 		existingRunID, _ := s.client.Get(ctx, key).Result()
 
-		return fmt.Errorf("recipient %s:%s already reserved by run %s", channel, recipient, existingRunID)
+		return fmt.Errorf("%w: recipient %s:%s already reserved by run %s", domain.ErrInternal, channel, recipient, existingRunID)
+	} else if err != nil {
+		return fmt.Errorf("%w: failed to reserve %s:%s: %v", domain.ErrInternal, channel, recipient, err)
 	}
 
 	return nil

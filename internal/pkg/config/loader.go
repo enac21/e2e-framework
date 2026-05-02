@@ -15,7 +15,7 @@ func LoadTestDefinitions(dir string) (map[string]domain.TestDefinition, error) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read test directory: %w", err)
+		return nil, fmt.Errorf("%w: failed to read test directory: %v", domain.ErrConfiguration, err)
 	}
 
 	for _, entry := range entries {
@@ -26,7 +26,7 @@ func LoadTestDefinitions(dir string) (map[string]domain.TestDefinition, error) {
 		path := filepath.Join(dir, entry.Name())
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read test file %s: %w", path, err)
+			return nil, fmt.Errorf("%w: failed to read test file %s: %v", domain.ErrConfiguration, path, err)
 		}
 
 		// Resolve env vars
@@ -40,7 +40,7 @@ func LoadTestDefinitions(dir string) (map[string]domain.TestDefinition, error) {
 
 		var def domain.TestDefinition
 		if err := yaml.Unmarshal([]byte(resolved), &def); err != nil {
-			return nil, fmt.Errorf("failed to parse test file %s: %w", path, err)
+			return nil, fmt.Errorf("%w: failed to parse test file %s: %v", domain.ErrConfiguration, path, err)
 		}
 
 		tests[def.ID] = def

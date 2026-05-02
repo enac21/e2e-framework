@@ -22,12 +22,13 @@ func NewWebhookReceiver(store ports.Store) *WebhookReceiver {
 
 func (r *WebhookReceiver) Start(ctx context.Context, runID string) error {
 	r.runID = runID
+
 	return nil
 }
 
 func (r *WebhookReceiver) Collect(ctx context.Context) (*domain.Message, error) {
 	if r.runID == "" {
-		return nil, fmt.Errorf("receiver not started")
+		return nil, fmt.Errorf("%w: receiver not started", domain.ErrConfiguration)
 	}
 
 	ticker := time.NewTicker(1 * time.Second)
@@ -36,12 +37,13 @@ func (r *WebhookReceiver) Collect(ctx context.Context) (*domain.Message, error) 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("timeout waiting for webhook message: %w", ctx.Err())
+			return nil, fmt.Errorf("%w: timeout waiting for webhook message: %v", domain.ErrTimeout, ctx.Err())
 		case <-ticker.C:
 			msg, err := r.store.Claim(ctx, r.runID, "webhook")
 			if err != nil {
-				return nil, fmt.Errorf("failed to claim message from store: %w", err)
+				return nil, fmt.Errorf("%w: failed to claim message from store: %v", domain.ErrInternal, err)
 			}
+
 			if msg != nil {
 				return msg, nil
 			}

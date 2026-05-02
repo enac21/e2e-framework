@@ -23,7 +23,8 @@ func NewNotContainsAssertion(cfg domain.AssertionConfig) (ports.Assertion, error
 func (a *NotContainsAssertion) Assert(msg *domain.Message) error {
 	actual := msg.Fields[a.field]
 	if strings.Contains(actual, a.value) {
-		return fmt.Errorf("field %q: expected NOT to contain %q, but it does", a.field, a.value)
+		return fmt.Errorf("%w: field %q: expected NOT to contain %q, but it does", domain.ErrValidation, a.field, a.value)
 	}
+
 	return nil
 }
