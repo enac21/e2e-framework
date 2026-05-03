@@ -24,6 +24,7 @@ type TestResult struct {
 	TestID      string
 	RunID       string
 	Status      RunStatus
+	Attempts    int
 	DurationMs  int64
 	Receivers   []ReceiverResult
 	Error       string

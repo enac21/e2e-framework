@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 The format follows a chronological order, newest changes first.
 
 ---
+## [2026-05-03] — Retry Logic (Roadmap Point 2)
+
+- **Feature**: Implemented retry logic in `internal/core/services/orchestrator.go`. The orchestrator now reads `def.Retry.Enabled`, `def.Retry.Attempts` and `def.Retry.Delay` from the YAML definition.
+- **Changed**: `execute()` refactored — recipient reservations are made **once** before the retry loop and released via `defer` after all attempts. Receivers are created, started and stopped on each individual attempt. `on_failure` notification is only sent after all attempts are exhausted.
+- **Domain**: Added `Attempts int` field to `domain.TestResult` to record the total number of execution attempts.
+- **Behaviour**: Configuration errors (failed to create/start a receiver) abort the retry loop immediately and are not retried. Trigger failures and collection/assertion failures are retried up to `attempts` times with `delay` between each.
+
+Example YAML:
+```yaml
+retry:
+  enabled: true
+  attempts: 3
+  delay: 5s
+```
+
+---
 ## [2026-05-03] — Receiver Options & IMAP Skeleton
 
 - **Feature**: Added `Options map[string]string` field to `domain.ReceiverConfig` (YAML key: `options:`). Allows each test to pass receiver-specific configuration (e.g., IMAP host, port, credentials) directly in the YAML without any code changes.

@@ -199,6 +199,24 @@ receivers:
 
 For webhook-based receivers (e.g., `request`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
 
+### Retry Logic
+
+By default, a test runs once and is marked as failed if any receiver times out or any assertion does not pass. For flaky or eventually-consistent systems, you can configure automatic retries using the `retry` block:
+
+```yaml
+retry:
+  enabled: true
+  attempts: 3
+  delay: 5s
+```
+
+- `attempts` — total number of executions (initial + retries). `attempts: 3` means the framework will try up to 3 times before giving up.
+- `delay` — how long to wait between attempts. Use standard Go duration strings (`5s`, `1m`, `500ms`).
+
+On each attempt the orchestrator re-creates the receivers, re-fires the trigger and re-collects. If any attempt passes completely, the test is marked as `passed` and no further attempts are made. The `on_failure` webhook (if configured) is only called **once**, after all attempts are exhausted.
+
+> **Note:** Configuration errors (e.g., an unknown receiver `type`) abort immediately and are never retried, since they will not resolve on their own.
+
 ---
 
 ## Adding a New Receiver

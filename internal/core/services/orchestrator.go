@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -56,7 +57,6 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 		RunID:     runID,
 		Status:    domain.StatusPassed,
 		StartedAt: startTime,
-		Receivers: make([]domain.ReceiverResult, 0, len(def.Receivers)),
 	}
 
 	if !def.Enabled {
@@ -67,19 +67,7 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 		return result
 	}
 
-	activeReceivers := make([]struct {
-		cfg      domain.ReceiverConfig
-		instance ports.Receiver
-	}, 0, len(def.Receivers))
-
-	defer func() {
-		for _, r := range activeReceivers {
-			_ = r.instance.Stop()
-			if r.cfg.Recipient != "" {
-				_ = o.store.Release(ctx, r.cfg.Type, r.cfg.Recipient)
-			}
-		}
-	}()
+	reservedRecipients := make([]domain.ReceiverConfig, 0, len(def.Receivers))
 
 	for _, rcfg := range def.Receivers {
 		if rcfg.Recipient != "" {
@@ -88,65 +76,126 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 
 				return result
 			}
+
+			reservedRecipients = append(reservedRecipients, rcfg)
+		}
+	}
+
+	defer func() {
+		for _, rcfg := range reservedRecipients {
+			_ = o.store.Release(ctx, rcfg.Type, rcfg.Recipient)
+		}
+	}()
+
+	maxAttempts := 1
+	if def.Retry.Enabled && def.Retry.Attempts > 1 {
+		maxAttempts = def.Retry.Attempts
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			log.Printf("[%s] retrying (attempt %d/%d) after previous failure", runID, attempt, maxAttempts)
 		}
 
-		instance, err := o.receivers.Create(rcfg.Type, rcfg.Options)
-		if err != nil {
-			o.failResult(result, fmt.Sprintf("failed to create receiver %s: %v", rcfg.Type, err))
+		result.Attempts = attempt
+		result.Receivers = make([]domain.ReceiverResult, 0, len(def.Receivers))
+		result.Status = domain.StatusPassed
+		result.Error = ""
+		result.TriggerVars = nil
 
-			return result
-		}
-
-		if err := instance.Start(ctx, runID); err != nil {
-			o.failResult(result, fmt.Sprintf("failed to start receiver %s: %v", rcfg.Type, err))
-
-			return result
-		}
-
-		activeReceivers = append(activeReceivers, struct {
+		activeReceivers := make([]struct {
 			cfg      domain.ReceiverConfig
 			instance ports.Receiver
-		}{cfg: rcfg, instance: instance})
-	}
+		}, 0, len(def.Receivers))
 
-	triggerVars, err := o.trigger.Execute(ctx, def.Trigger, runID)
-	if err != nil {
-		o.failResult(result, fmt.Sprintf("trigger failed: %v", err))
-		o.notifyFailure(ctx, def.OnFailure, result)
+		configErr := false
 
-		return result
-	}
+		for _, rcfg := range def.Receivers {
+			instance, err := o.receivers.Create(rcfg.Type, rcfg.Options)
+			if err != nil {
+				o.failResult(result, fmt.Sprintf("failed to create receiver %s: %v", rcfg.Type, err))
+				configErr = true
 
-	result.TriggerVars = triggerVars
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-
-	for _, r := range activeReceivers {
-		wg.Add(1)
-
-		go func(rcfg domain.ReceiverConfig, instance ports.Receiver) {
-			defer wg.Done()
-
-			rcvStart := time.Now()
-			rcvResult := o.collectAndAssert(ctx, runID, rcfg, instance, triggerVars)
-			rcvResult.DurationMs = time.Since(rcvStart).Milliseconds()
-
-			mu.Lock()
-
-			result.Receivers = append(result.Receivers, rcvResult)
-
-			if rcvResult.Status == domain.StatusError && result.Status != domain.StatusError {
-				result.Status = domain.StatusError
-			} else if rcvResult.Status == domain.StatusFailed && result.Status == domain.StatusPassed {
-				result.Status = domain.StatusFailed
+				break
 			}
 
-			mu.Unlock()
-		}(r.cfg, r.instance)
-	}
+			if err := instance.Start(ctx, runID); err != nil {
+				o.failResult(result, fmt.Sprintf("failed to start receiver %s: %v", rcfg.Type, err))
+				configErr = true
 
-	wg.Wait()
+				break
+			}
+
+			activeReceivers = append(activeReceivers, struct {
+				cfg      domain.ReceiverConfig
+				instance ports.Receiver
+			}{cfg: rcfg, instance: instance})
+		}
+
+		stopActiveReceivers := func() {
+			for _, r := range activeReceivers {
+				_ = r.instance.Stop()
+			}
+		}
+
+		if configErr {
+			stopActiveReceivers()
+
+			break
+		}
+
+		triggerVars, err := o.trigger.Execute(ctx, def.Trigger, runID)
+		if err != nil {
+			o.failResult(result, fmt.Sprintf("trigger failed: %v", err))
+			stopActiveReceivers()
+
+			if attempt < maxAttempts {
+				time.Sleep(def.Retry.Delay)
+			}
+
+			continue
+		}
+
+		result.TriggerVars = triggerVars
+
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		for _, r := range activeReceivers {
+			wg.Add(1)
+
+			go func(rcfg domain.ReceiverConfig, instance ports.Receiver) {
+				defer wg.Done()
+
+				rcvStart := time.Now()
+				rcvResult := o.collectAndAssert(ctx, runID, rcfg, instance, triggerVars)
+				rcvResult.DurationMs = time.Since(rcvStart).Milliseconds()
+
+				mu.Lock()
+
+				result.Receivers = append(result.Receivers, rcvResult)
+
+				if rcvResult.Status == domain.StatusError && result.Status != domain.StatusError {
+					result.Status = domain.StatusError
+				} else if rcvResult.Status == domain.StatusFailed && result.Status == domain.StatusPassed {
+					result.Status = domain.StatusFailed
+				}
+
+				mu.Unlock()
+			}(r.cfg, r.instance)
+		}
+
+		wg.Wait()
+		stopActiveReceivers()
+
+		if result.Status == domain.StatusPassed {
+			break
+		}
+
+		if attempt < maxAttempts {
+			time.Sleep(def.Retry.Delay)
+		}
+	}
 
 	result.FinishedAt = time.Now()
 	result.DurationMs = result.FinishedAt.Sub(startTime).Milliseconds()
