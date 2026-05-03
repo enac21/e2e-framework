@@ -144,16 +144,25 @@ trigger:
     transaction_id: "data.id"
 
 receivers:
-  - type: email
-    timeout: 30s
-    recipient: "test@gmail.com"
+  - type: imap
+    timeout: 60s
+    options:
+      host: imap.gmail.com
+      port: "993"
+      username: test@gmail.com
+      password: secret
+      mailbox: INBOX
+      tls: true
     assertions:
       - type: contains
-        field: body
-        value: "Expected text"
-      - type: equals
-        field: transaction_id
-        value: "{{transaction_id}}"
+        field: subject
+        value: "Welcome"
+  - type: request
+    timeout: 60s
+    assertions:
+      - type: contains
+        field: subject
+        value: "Welcome"
 
 on_failure:
   webhook:
@@ -170,6 +179,25 @@ You can dynamically inject values across your test definition using the `{{varia
 - **Trigger Extraction**: If your trigger hits an API that returns JSON, you can use the `extract` block to map JSON paths (using dot-notation, like `data.id`) to variable names (like `transaction_id`). You can then use these variables in your assertions (e.g., `value: "{{transaction_id}}"`) to validate dynamic runtime data.
 
 See `tests/example_welcome_email.yaml` for a complete example.
+
+### Receiver Options
+
+Some receivers (like `imap`) require connection-specific configuration that can vary per test. Use the `options` block inside the receiver definition to pass any key-value configuration. These options are passed directly to the receiver factory, so each test can target a different server:
+
+```yaml
+receivers:
+  - type: imap
+    timeout: 60s
+    options:
+      host: imap.company.com
+      port: "993"
+      username: qa@company.com
+      password: secret
+      mailbox: INBOX
+      tls: "true"
+```
+
+For webhook-based receivers (e.g., `request`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
 
 ---
 

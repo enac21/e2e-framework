@@ -18,7 +18,7 @@ trigger:
 #    extracted_from: "test_id"
 
 receivers:
-  - type: sms
+  - type: request
     timeout: 10s
     assertions:
       - type: equals

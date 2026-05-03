@@ -16,12 +16,11 @@ import (
 	"e2e-framework/internal/adapters/secondary/assertion"
 	"e2e-framework/internal/adapters/secondary/notifier"
 	"e2e-framework/internal/adapters/secondary/receiver"
-	"e2e-framework/internal/adapters/secondary/receiver/email"
-	"e2e-framework/internal/adapters/secondary/receiver/push"
-	"e2e-framework/internal/adapters/secondary/receiver/sms"
-	rcvWebhook "e2e-framework/internal/adapters/secondary/receiver/webhook"
+	"e2e-framework/internal/adapters/secondary/receiver/imap"
+	"e2e-framework/internal/adapters/secondary/receiver/request"
 	"e2e-framework/internal/adapters/secondary/store"
 	"e2e-framework/internal/adapters/secondary/trigger"
+	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/services"
 	"e2e-framework/internal/pkg/config"
@@ -67,10 +66,18 @@ func main() {
 	assertionReg.Register("not_contains", assertion.NewNotContainsAssertion)
 
 	receiverReg := receiver.NewReceiverRegistry()
-	receiverReg.Register("webhook", func() ports.Receiver { return rcvWebhook.NewWebhookReceiver(redisStore) })
-	receiverReg.Register("sms", func() ports.Receiver { return sms.NewSmsReceiver(redisStore) })
-	receiverReg.Register("push", func() ports.Receiver { return push.NewPushReceiver(redisStore) })
-	receiverReg.Register("email", func() ports.Receiver { return email.NewEmailReceiver(redisStore) })
+	receiverReg.Register(
+		domain.RequestReceiverType,
+		func(options map[string]string) (ports.Receiver, error) {
+			return request.NewRequestReceiver(redisStore), nil
+		},
+	)
+	receiverReg.Register(
+		domain.ImapReceiverType,
+		func(options map[string]string) (ports.Receiver, error) {
+			return imap.NewIMAPReceiver(options)
+		},
+	)
 
 	// Core Orchestrator
 	orchestrator := services.NewOrchestrator(

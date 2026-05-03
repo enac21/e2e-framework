@@ -34,6 +34,7 @@ type ReceiverConfig struct {
 	Type       string            `yaml:"type"`
 	Timeout    time.Duration     `yaml:"timeout"`
 	Recipient  string            `yaml:"recipient"`
+	Options    map[string]string `yaml:"options"`
 	Assertions []AssertionConfig `yaml:"assertions"`
 }
 

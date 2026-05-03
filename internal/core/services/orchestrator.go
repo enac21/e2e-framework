@@ -90,7 +90,7 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 			}
 		}
 
-		instance, err := o.receivers.Create(rcfg.Type)
+		instance, err := o.receivers.Create(rcfg.Type, rcfg.Options)
 		if err != nil {
 			o.failResult(result, fmt.Sprintf("failed to create receiver %s: %v", rcfg.Type, err))
 

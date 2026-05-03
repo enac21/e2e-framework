@@ -28,7 +28,7 @@ func (e *TwilioExtractor) Extract(req *http.Request) (*domain.Message, error) {
 
 	return &domain.Message{
 		RunID:        runID,
-		ReceiverType: "sms",
+		ReceiverType: domain.RequestReceiverType,
 		ReceivedAt:   time.Now(),
 		Headers: map[string]string{
 			"content-type": req.Header.Get("Content-Type"),

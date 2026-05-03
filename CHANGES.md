@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format follows a chronological order, newest changes first.
 
 ---
+## [2026-05-03] — Receiver Options & IMAP Skeleton
+
+- **Feature**: Added `Options map[string]string` field to `domain.ReceiverConfig` (YAML key: `options:`). Allows each test to pass receiver-specific configuration (e.g., IMAP host, port, credentials) directly in the YAML without any code changes.
+- **Changed**: `ReceiverFactory` signature updated from `func() ports.Receiver` to `func(options map[string]string) (ports.Receiver, error)`. The registry now passes the YAML options to the factory at creation time.
+- **Feature**: Added `IMAPReceiver` skeleton in `internal/adapters/secondary/receiver/imap/receiver.go`. Reads `host`, `port`, `username`, `password`, `mailbox`, and `tls` from the options map. Marked with `TODO` where the real IMAP client will be injected.
+- **New Port**: Added `ports.IMAPClient` interface in `internal/core/ports/imap_client.go`.
+- **Updated**: `README.md` — added `options:` field documentation and IMAP receiver example.
+
+---
 
 ## [2026-05-01] — Step 19: Clean Code, Linter & Domain Errors
 
