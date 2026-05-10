@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format follows a chronological order, newest changes first.
 
 ---
+## [2026-05-09] — Security: JWT Authentication (Roadmap Point 3)
+
+- **New dependency**: `github.com/golang-jwt/jwt/v5`.
+- **New error**: `domain.ErrUnauthorized` added to `internal/core/domain/errors.go`.
+- **New package**: `internal/pkg/auth/jwt.go` — `Claims` struct (`Provider string` + `jwt.RegisteredClaims`) and `ValidateToken(tokenStr, secret string) (*Claims, error)`.
+- **Config**: Added `auth.enabled` and `auth.jwt_secret` (via `{{env.JWT_SECRET}}`) to `config.go` and `configs/config.yaml`. Defaults to `enabled: false` for backward compatibility.
+- **HTTP API** (`internal/adapters/primary/http/server.go`): Added `authMiddleware` validating `Authorization: Bearer <JWT>`. Protects `/run`, `/results`, `/results/`, `/swagger/`. `/health` remains public.
+- **Webhook Server** (`internal/adapters/primary/webhook/server.go`): Validates JWT from `?token=<jwt>` query param. Both servers log `sub` and `provider` claims on authenticated requests.
+- **Wiring** (`cmd/server/main.go`): Both `NewServer` calls updated to pass `cfg.Auth.Enabled` and `cfg.Auth.JWTSecret`.
+
+---
 ## [2026-05-03] — Retry Logic (Roadmap Point 2)
 
 - **Feature**: Implemented retry logic in `internal/core/services/orchestrator.go`. The orchestrator now reads `def.Retry.Enabled`, `def.Retry.Attempts` and `def.Retry.Delay` from the YAML definition.

@@ -240,12 +240,40 @@ Required environment variables:
 
 ---
 
-## Roadmap / Pending Tasks
+## Roadmap
 
-- [x] **Trigger Data Extraction**: `TriggerConfig.Extract` map (dot-notation paths). `HTTPTrigger.Execute` now returns `map[string]string` of extracted values. `TestResult.TriggerVars` exposes them.
-- [x] **Async API Execution**: `TestDefinition.Async` flag. `/run` returns `202 Accepted` with `run_id` immediately. New `GET /results/{run_id}` polling endpoint. Added `StatusRunning`.
-- [x] **Redis Data Cleanup**: `ports.Store.Delete` added. Orchestrator calls `Delete` after each receiver successfully collects its message.
-- [x] **Recipient Reservation (Concurrency Protection)**: `ReceiverConfig.Recipient` field. Orchestrator calls `Reserve` before starting each receiver and `Release` in the deferred cleanup.
+The items below are ordered by priority. Completed items are marked ✅.
+
+### ✅ 1. Trigger Variable Injection
+Extracted values from the `extract` block are injected into assertion `field` and `value` using `{{variable_name}}` syntax via `template.ReplaceString`. `TestResult.TriggerVars` exposes the resolved values.
+
+### ✅ 2. Retry Logic
+The orchestrator reads `retry.enabled`, `retry.attempts` and `retry.delay` from the test YAML. Recipients are reserved once before the retry loop. Receivers are re-created on each attempt. `on_failure` is notified only after all attempts are exhausted. `TestResult.Attempts` records how many tries were made.
+
+### ✅ 3. Security — JWT Authentication
+A shared `auth.jwt_secret` (env var `JWT_SECRET`) is used to sign and validate JWTs. The HTTP API validates `Authorization: Bearer <token>`. The Webhook server validates `?token=<jwt>` in the URL (compatible with Twilio, Meta, and any provider that lets you configure the callback URL freely). Both servers are fully bypass-able by setting `auth.enabled: false` for local development.
+
+### 4. IMAP Receiver Implementation
+The `IMAPReceiver` skeleton and `ports.IMAPClient` interface already exist. The remaining work is implementing `internal/adapters/secondary/imap_client/client.go` using `github.com/emersion/go-imap/v2`, wiring `Connect`, `SearchByRunID` and `Disconnect`, and removing the `TODO` blanks in the receiver.
+
+### 5. Hexagonal Architecture — IngestUseCase Port (Tech Debt)
+The `WebhookServer` currently calls `store.Deposit` directly, bypassing the domain layer. A `ports.MessageIngestor` interface and `services.Ingestor` use case should be introduced so all ingestion logic (validation, enrichment, routing) has a single place.
+
+### 6. Structured Observability
+Replace `log.Printf` with `log/slog` (Go 1.21+). Every orchestrator log line should include the `RunID` as a structured field (correlation ID). Optionally expose a `GET /metrics` endpoint for Prometheus.
+
+### 7. Dynamic Hot-Reload
+Test YAML files are loaded once at startup. Use `fsnotify` to reload `tests/*.yaml` on change (local mode) or expose a `POST /system/reload` endpoint for CI/CD and Git webhook integration.
+
+### 8. Result Persistence
+Replace the in-memory `map[string]*domain.TestResult` (max 100 entries, lost on restart) with a durable store. Proposed: Redis with a JSON blob per `run_id` plus a `ZSET` for chronological listing, and a configurable TTL.
+
+### 9. Improve API JSON Response Messages
+Standardise all error responses to return `Content-Type: application/json` with a consistent body:
+```json
+{ "code": 401, "message": "unauthorized" }
+```
+Currently `http.Error` returns `text/plain`, which is inconsistent with the JSON success responses.
 
 ---
 

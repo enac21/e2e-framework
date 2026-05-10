@@ -11,4 +11,5 @@ var (
 	ErrValidation    = errors.New("validation failed")
 	ErrInternal      = errors.New("internal system error")
 	ErrUnimplemented = errors.New("unimplemented feature")
+	ErrUnauthorized  = errors.New("unauthorized")
 )

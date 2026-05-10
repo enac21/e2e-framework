@@ -89,8 +89,16 @@ func main() {
 	)
 
 	// Setup primary adapters
-	apiServer := api.NewServer(cfg.Server.Port, orchestrator, tests)
-	whServer := webhook.NewServer(cfg.Webhook.Port, redisStore)
+	apiServer := api.NewServer(&api.Config{
+		Port:       cfg.Server.Port,
+		AuthEnable: cfg.Auth.Enabled,
+		JWTSecret:  cfg.Auth.JWTSecret,
+	}, orchestrator, tests)
+
+	whServer := webhook.NewServer(&webhook.Config{
+		Port: cfg.Webhook.Port,
+		//TODO - Add auth config
+	}, redisStore)
 	whServer.RegisterExtractor("twilio", webhook.NewTwilioExtractor())
 	whServer.RegisterExtractor("meta", webhook.NewMetaExtractor())
 

@@ -8,6 +8,10 @@ server:
   port: 8080
   timeout: 30s
 
+auth:
+  enabled: true
+  jwt_secret: "{{env.JWT_SECRET}}"
+
 webhook:
   port: 8081
 

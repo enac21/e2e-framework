@@ -14,6 +14,10 @@ type Config struct {
 	Server struct {
 		Port int `yaml:"port"`
 	} `yaml:"server"`
+	Auth struct {
+		Enabled   bool   `yaml:"enabled"`
+		JWTSecret string `yaml:"jwt_secret"`
+	} `yaml:"auth"`
 	Store struct {
 		Redis struct {
 			URL string `yaml:"url"`

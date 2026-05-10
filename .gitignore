@@ -20,6 +20,9 @@ go.work
 # Build directory (from our Makefile)
 bin/
 
+#ai
+.agents
+
 # Environment variables
 .env
 

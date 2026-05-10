@@ -18,9 +18,14 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
-const maxStoredResults = 100
+const (
+	maxStoredResults = 100
+
+	unauthorizedMessage = "unauthorized"
+)
 
 type Server struct {
+	cfg          *Config
 	httpServer   *http.Server
 	orchestrator *services.Orchestrator
 	tests        map[string]domain.TestDefinition
@@ -29,8 +34,15 @@ type Server struct {
 	mu           sync.RWMutex
 }
 
-func NewServer(port int, orchestrator *services.Orchestrator, tests map[string]domain.TestDefinition) *Server {
+type Config struct {
+	Port       int
+	AuthEnable bool
+	JWTSecret  string
+}
+
+func NewServer(cfg *Config, orchestrator *services.Orchestrator, tests map[string]domain.TestDefinition) *Server {
 	s := &Server{
+		cfg:          cfg,
 		orchestrator: orchestrator,
 		tests:        tests,
 		results:      make(map[string]*domain.TestResult),
@@ -43,23 +55,46 @@ func NewServer(port int, orchestrator *services.Orchestrator, tests map[string]d
 	mux.HandleFunc("/health", s.handleHealth)
 
 	log.Printf("[HTTP API] Registered endpoint: POST /run")
-	mux.HandleFunc("/run", s.handleRun)
+	mux.HandleFunc("/run", s.authMiddleware(s.handleRun))
 
 	log.Printf("[HTTP API] Registered endpoint: GET /results")
-	mux.HandleFunc("/results", s.handleResults)
+	mux.HandleFunc("/results", s.authMiddleware(s.handleResults))
 
 	log.Printf("[HTTP API] Registered endpoint: GET /results/{run_id}")
-	mux.HandleFunc("/results/", s.handleResultByID)
+	mux.HandleFunc("/results/", s.authMiddleware(s.handleResultByID))
 
 	log.Printf("[HTTP API] Registered endpoint: GET /swagger/*")
-	mux.Handle("/swagger/", httpSwagger.WrapHandler)
+	mux.Handle("/swagger/", s.authMiddleware(httpSwagger.WrapHandler.ServeHTTP))
 
 	s.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
+		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: mux,
 	}
 
 	return s
+}
+
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.cfg.AuthEnable {
+			next(w, r)
+
+			return
+		}
+
+		token := strings.TrimPrefix(
+			r.Header.Get("Authorization"),
+			"Bearer ",
+		)
+
+		if token == "" {
+			http.Error(w, unauthorizedMessage, http.StatusUnauthorized)
+
+			return
+		}
+
+		next(w, r)
+	}
 }
 
 func (s *Server) Start() error {
@@ -97,6 +132,7 @@ func (s *Server) storeResult(res *domain.TestResult) {
 // @Produce json
 // @Success 200 {object} domain.TestResult
 // @Success 202 {object} map[string]string "Async mode: returns run_id and status"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 404 {string} string "Test ID not found"
 // @Router /run [post]
@@ -151,6 +187,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 // @Param run_id path string true "Run ID"
 // @Produce json
 // @Success 200 {object} domain.TestResult
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 400 {string} string "Run ID required"
 // @Failure 404 {string} string "Run not found"
 // @Router /results/{run_id} [get]
@@ -181,8 +218,9 @@ func (s *Server) handleResultByID(w http.ResponseWriter, r *http.Request) {
 // @Tags Results
 // @Produce json
 // @Success 200 {array} domain.TestResult
+// @Failure 401 {string} string "Unauthorized"
 // @Router /results [get]
-func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleResults(w http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
 	list := make([]*domain.TestResult, 0, len(s.resultOrder))
 	for _, id := range s.resultOrder {

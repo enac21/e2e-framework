@@ -11,15 +11,21 @@ import (
 )
 
 type Server struct {
+	cfg        *Config
 	httpServer *http.Server
 	store      ports.Store
 	extractors map[string]ports.Extractor
 }
 
-func NewServer(port int, store ports.Store) *Server {
+type Config struct {
+	Port int
+}
+
+func NewServer(cfg *Config, store ports.Store) *Server {
 	mux := http.NewServeMux()
 
 	s := &Server{
+		cfg:        cfg,
 		store:      store,
 		extractors: make(map[string]ports.Extractor),
 	}
@@ -27,7 +33,7 @@ func NewServer(port int, store ports.Store) *Server {
 	mux.HandleFunc("/webhook/", s.handleWebhook)
 
 	s.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
+		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: mux,
 	}
 
@@ -46,6 +52,7 @@ func (s *Server) Start() error {
 func (s *Server) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	return s.httpServer.Shutdown(ctx)
 }
 
@@ -56,6 +63,7 @@ func (s *Server) Stop() error {
 // @Param provider path string true "Provider name (e.g., twilio, meta)"
 // @Produce json
 // @Success 202
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Unknown provider"
 // @Failure 400 {string} string "Error extracting message data"
 // @Failure 500 {string} string "Internal server error"
@@ -72,9 +80,10 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//TODO - Add auth middleware per provider.
 	msg, err := extractor.Extract(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		//TODO - Error handler in base of the domain error
 
 		return
 	}
@@ -92,4 +101,10 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	//WIP
+
+	return
 }
