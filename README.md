@@ -266,7 +266,7 @@ The orchestrator reads `retry.enabled`, `retry.attempts` and `retry.delay` from 
 ### ✅ 3. Security — JWT Authentication
 A shared `auth.jwt_secret` (env var `JWT_SECRET`) is used to sign and validate JWTs. The HTTP API validates `Authorization: Bearer <token>`. The Webhook server validates `?token=<jwt>` in the URL (compatible with Twilio, Meta, and any provider that lets you configure the callback URL freely). Both servers are fully bypass-able by setting `auth.enabled: false` for local development.
 
-### 4. IMAP Receiver Implementation
+### ✅ 4. IMAP Receiver Implementation
 The `IMAPReceiver` skeleton and `ports.IMAPClient` interface already exist. The remaining work is implementing `internal/adapters/secondary/imap_client/client.go` using `github.com/emersion/go-imap/v2`, wiring `Connect`, `SearchByRunID` and `Disconnect`, and removing the `TODO` blanks in the receiver.
 
 ### 5. Hexagonal Architecture — IngestUseCase Port (Tech Debt)
