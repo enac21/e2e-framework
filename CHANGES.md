@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 The format follows a chronological order, newest changes first.
 
 ---
+## [2026-05-12] — Domain Error Wrapper Helper
+
+- **New package**: Added `errorwrapper` package in `internal/pkg/errorwrapper/wrapper.go` with `Wrap(domainErr, err)` helper to standardise error wrapping without redundant messages.
+- **Refactored**: Updated `internal/adapters/secondary/receiver/imap/client.go` to use `errorwrapper.Wrap` instead of inline `fmt.Errorf`.
+
+---
+## [2026-05-10] — OptionsMap: native YAML types in receiver options
+
+- **New type**: `domain.OptionsMap` (`map[string]string` with custom `UnmarshalYAML`) in `internal/core/domain/test.go`. Allows `bool`, `int`, `float` in YAML `options` blocks — all normalized to `string` transparently. Existing adapters unchanged.
+- **Updated**: `tests/example_welcome_email.yaml` — `tls: true` now uses native YAML boolean instead of quoted string.
+
+## [2026-05-10] — IMAP Receiver Implementation (Roadmap Point 5)
+
+- **New dependency**: `github.com/emersion/go-imap/v2`, `github.com/emersion/go-imap/v2/imapclient`, `github.com/emersion/go-message`.
+- **New dependency**: `go.uber.org/mock/gomock` + `mockgen` CLI for generated test mocks.
+- **New port**: `internal/core/ports/imap_client.go` — `IMAPClient` interface (`Connect`, `SearchByRunID`, `Disconnect`).
+- **New adapter**: `internal/adapters/secondary/receiver/imap/client.go` — `GoIMAPClient` implementing `IMAPClient` via `go-imap/v2`. Searches `runID` first in Subject header, then in Body.
+- **New file**: `internal/adapters/secondary/receiver/imap/parser.go` — pure `parseMessage` function using `go-message/mail`. Extracts `text/plain`, `text/html`, all headers and date into `domain.Message`.
+- **Refactored**: `internal/adapters/secondary/receiver/imap/receiver.go` — `NewIMAPReceiver` now wires `GoIMAPClient` from options map. Removed all TODO and TEMP placeholder code.
+- **New mocks**: `internal/core/ports/mocks/` — generated mocks for all 7 port interfaces (`Assertion`, `Extractor`, `IMAPClient`, `Notifier`, `Receiver`, `Store`, `Trigger`).
+- **New tests**: `internal/adapters/secondary/receiver/imap/receiver_test.go` — 12 unit tests using `gomock` EXPECT covering full lifecycle (constructor validation, Start, Collect, Stop).
+- **New tests**: `internal/adapters/secondary/receiver/imap/client_test.go` — 8 unit tests for `parseMessage` covering plain text, multipart, HTML-only, Q-encoded subject, named from, headers, date and malformed input.
+- **Config**: `tests/example_welcome_email.yaml` — IMAP `options` block updated to use `{{env.IMAP_HOST}}`, `{{env.IMAP_PORT}}`, `{{env.IMAP_USERNAME}}`, `{{env.IMAP_PASSWORD}}` env vars. IMAP credentials are per-test, not global config.
+- **Makefile**: Added `make mocks` target wrapping `go generate ./internal/core/ports/...`.
+- **README**: Added `## Generate Mocks` section documenting `make mocks`.
+
+---
 ## [2026-05-09] — Security: JWT Authentication (Roadmap Point 3)
 
 - **New dependency**: `github.com/golang-jwt/jwt/v5`.

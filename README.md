@@ -63,6 +63,16 @@ e2e-testing-service/
 
 ---
 
+## Generate Mocks
+
+```bash
+go install github.com/golang/mock/mockgen
+```
+
+```bash
+make mocks
+```
+
 ## Quick Start
 
 ### Local Development
@@ -232,11 +242,14 @@ environment variables using the `{{env.VAR_NAME}}` syntax.
 
 Required environment variables:
 
-| Variable | Description |
-|----------|-------------|
-| `REDIS_URL` | Redis connection URL |
-| `WEBHOOK_BASE_URL` | Base URL for the webhook receiver |
-| `API_TOKEN` | API token for trigger requests (test-specific) |
+| Variable        | Description                   |
+|-----------------|-------------------------------|
+| `REDIS_URL`     | Redis connection URL          |
+| `JWT_SECRET`    | Jwt authentication secret     |
+| `IMAP_HOST`     | Imap service host             |
+| `IMAP_PORT`     | Imap service port             |
+| `IMAP_USERNAME` | Imap service username         |
+| `IMAP_PASSWORD` | Imap service password         |
 
 ---
 

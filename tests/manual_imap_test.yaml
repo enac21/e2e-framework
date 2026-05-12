@@ -1,0 +1,28 @@
+version: "1"
+id: manual_imap_test
+description: "Test to validate the IMAP receiver (manually)."
+enabled: true
+async: true
+
+retry:
+  enabled: false
+
+trigger:
+  method: GET
+  url: "https://httpbin.org/uuid"
+  timeout: 5s
+
+receivers:
+  - type: imap
+    timeout: 300s
+    options:
+      host: "{{env.IMAP_HOST}}"
+      port: "{{env.IMAP_PORT}}"
+      username: "{{env.IMAP_USERNAME}}"
+      password: "{{env.IMAP_PASSWORD}}"
+      mailbox: INBOX
+      tls: true
+    assertions:
+      - type: contains
+        field: subject
+        value: "{{run_id}}"

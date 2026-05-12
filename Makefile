@@ -25,6 +25,10 @@ test-integration:
 lint:
 	go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run
 
+# Generate mocks
+mocks:
+	go generate ./internal/core/ports/...
+
 # Build Docker image
 docker-build:
 	docker build -t e2e-testing-service .

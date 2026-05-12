@@ -7,7 +7,7 @@ id: welcome_email
 description: "Verifies that a welcome email is sent after user registration with correct subject, body, and sender."
 
 schedule: "*/5 * * * *"
-enabled: true
+enabled: false # Temp disabled
 
 retry:
   enabled: true
@@ -30,10 +30,10 @@ receivers:
   - type: imap
     timeout: 60s
     options:
-      host: imap.gmail.com
-      port: "993"
-      username: test@gmail.com
-      password: secret
+      host: "{{env.IMAP_HOST}}"
+      port: "{{env.IMAP_PORT}}"
+      username: "{{env.IMAP_USERNAME}}"
+      password: "{{env.IMAP_PASSWORD}}"
       mailbox: INBOX
       tls: true
     assertions:

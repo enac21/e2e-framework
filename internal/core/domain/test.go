@@ -1,6 +1,11 @@
 package domain
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
 
 type TestDefinition struct {
 	Version     string           `yaml:"version"`
@@ -34,8 +39,26 @@ type ReceiverConfig struct {
 	Type       string            `yaml:"type"`
 	Timeout    time.Duration     `yaml:"timeout"`
 	Recipient  string            `yaml:"recipient"`
-	Options    map[string]string `yaml:"options"`
+	Options    OptionsMap        `yaml:"options"`
 	Assertions []AssertionConfig `yaml:"assertions"`
+}
+
+type OptionsMap map[string]string
+
+func (o *OptionsMap) UnmarshalYAML(value *yaml.Node) error {
+	raw := make(map[string]any)
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	result := make(OptionsMap, len(raw))
+	for k, v := range raw {
+		result[k] = fmt.Sprintf("%v", v)
+	}
+
+	*o = result
+
+	return nil
 }
 
 type AssertionConfig struct {

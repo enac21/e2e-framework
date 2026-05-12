@@ -113,6 +113,12 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 			continue
 		}
 
+		if triggerVars == nil {
+			triggerVars = make(map[string]string)
+		}
+
+		triggerVars["run_id"] = runID
+
 		result.TriggerVars = triggerVars
 
 		o.collectAll(ctx, runID, active, triggerVars, result)

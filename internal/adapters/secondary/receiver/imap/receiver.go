@@ -3,6 +3,7 @@ package imap
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -11,8 +12,8 @@ import (
 )
 
 type IMAPReceiver struct {
-	client ports.IMAPClient
-	runID  string
+	Client ports.IMAPClient
+	RunID  string
 }
 
 func NewIMAPReceiver(options map[string]string) (*IMAPReceiver, error) {
@@ -38,33 +39,26 @@ func NewIMAPReceiver(options map[string]string) (*IMAPReceiver, error) {
 		mailbox = "INBOX"
 	}
 
-	tls, _ := strconv.ParseBool(options["tls"])
+	useTLS, _ := strconv.ParseBool(options["tls"])
 
-	// TEMP USE OF VARS - REMOVE AFTER IMPLEMENTATION
-	_ = host
-	_ = portNum
-	_ = username
-	_ = password
-	_ = mailbox
-	_ = tls
+	client := NewGoIMAPClient(host, portNum, username, password, mailbox, useTLS)
 
-	// TODO: initialize real IMAP client and assign to client field
-	// client := imaplib.NewClient(host, portNum, username, password, mailbox, tls)
-	return &IMAPReceiver{}, nil
+	return &IMAPReceiver{Client: client}, nil
 }
 
 func (r *IMAPReceiver) Start(ctx context.Context, runID string) error {
-	if err := r.client.Connect(); err != nil {
+	if err := r.Client.Connect(); err != nil {
 		return fmt.Errorf("%w: failed to connect to IMAP server: %v", domain.ErrInternal, err)
 	}
 
-	r.runID = runID
+	log.Printf("[%s] IMAP receiver connected to mailbox successfully, starting to poll...", runID)
+	r.RunID = runID
 
 	return nil
 }
 
 func (r *IMAPReceiver) Collect(ctx context.Context) (*domain.Message, error) {
-	if r.runID == "" {
+	if r.RunID == "" {
 		return nil, fmt.Errorf("%w: receiver not started", domain.ErrConfiguration)
 	}
 
@@ -74,9 +68,9 @@ func (r *IMAPReceiver) Collect(ctx context.Context) (*domain.Message, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("%w: timeout waiting for email with runID %s: %v", domain.ErrTimeout, r.runID, ctx.Err())
+			return nil, fmt.Errorf("%w: timeout waiting for email with runID %s: %v", domain.ErrTimeout, r.RunID, ctx.Err())
 		case <-ticker.C:
-			msg, err := r.client.SearchByRunID(ctx, r.runID)
+			msg, err := r.Client.SearchByRunID(ctx, r.RunID)
 			if err != nil {
 				return nil, fmt.Errorf("%w: failed to search inbox: %v", domain.ErrInternal, err)
 			}
@@ -89,5 +83,5 @@ func (r *IMAPReceiver) Collect(ctx context.Context) (*domain.Message, error) {
 }
 
 func (r *IMAPReceiver) Stop() error {
-	return r.client.Disconnect()
+	return r.Client.Disconnect()
 }

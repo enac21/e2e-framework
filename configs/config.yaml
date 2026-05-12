@@ -28,8 +28,6 @@ tests:
   path: "./tests"
 
 receivers:
-  email:
-    # fields TBD during EmailReceiver implementation
   sms:
     provider: twilio
     # fields TBD during SmsReceiver implementation
