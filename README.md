@@ -272,21 +272,24 @@ The `IMAPReceiver` skeleton and `ports.IMAPClient` interface already exist. The 
 ### 5. Hexagonal Architecture — IngestUseCase Port (Tech Debt)
 The `WebhookServer` currently calls `store.Deposit` directly, bypassing the domain layer. A `ports.MessageIngestor` interface and `services.Ingestor` use case should be introduced so all ingestion logic (validation, enrichment, routing) has a single place.
 
-### 6. Structured Observability
-Replace `log.Printf` with `log/slog` (Go 1.21+). Every orchestrator log line should include the `RunID` as a structured field (correlation ID). Optionally expose a `GET /metrics` endpoint for Prometheus.
-
-### 7. Dynamic Hot-Reload
+### 6. Dynamic Hot-Reload
 Test YAML files are loaded once at startup. Use `fsnotify` to reload `tests/*.yaml` on change (local mode) or expose a `POST /system/reload` endpoint for CI/CD and Git webhook integration.
 
-### 8. Result Persistence
+### 7. Result Persistence
 Replace the in-memory `map[string]*domain.TestResult` (max 100 entries, lost on restart) with a durable store. Proposed: Redis with a JSON blob per `run_id` plus a `ZSET` for chronological listing, and a configurable TTL.
 
-### 9. Improve API JSON Response Messages
+### 8. Improve API JSON Response Messages
 Standardise all error responses to return `Content-Type: application/json` with a consistent body:
 ```json
 { "code": 401, "message": "unauthorized" }
 ```
 Currently `http.Error` returns `text/plain`, which is inconsistent with the JSON success responses.
+
+### 9. Production-Ready Console Logging System
+Implement a reworked, structured logging system (e.g., using `log/slog`) that outputs strictly to standard console (stdout/stderr). This ensures logs are properly captured, parseable, and fully functional when the project is deployed in production environments like containers, Kubernetes, or any other cloud-native orchestrator.
+
+### 10. Comprehensive Documentation & YAML Reference
+Review and enhance the `README.md` documentation. The primary goal is to thoroughly document each feature and rule of the framework strictly from the perspective of the YAML configuration file, providing clear examples and use cases for end-users to understand how to leverage all capabilities.
 
 ---
 

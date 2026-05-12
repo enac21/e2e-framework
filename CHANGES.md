@@ -4,8 +4,9 @@ All notable changes to this project will be documented in this file.
 The format follows a chronological order, newest changes first.
 
 ---
-## [2026-05-12] — Domain Error Wrapper Helper
+## [2026-05-12] — Roadmap update and Domain Error Wrapper
 
+- **Documentation**: Updated `README.md` roadmap. Reformulated observability to point 9 as "Production-Ready Console Logging System", and added point 10 "Comprehensive Documentation & YAML Reference".
 - **New package**: Added `errorwrapper` package in `internal/pkg/errorwrapper/wrapper.go` with `Wrap(domainErr, err)` helper to standardise error wrapping without redundant messages.
 - **Refactored**: Updated `internal/adapters/secondary/receiver/imap/client.go` to use `errorwrapper.Wrap` instead of inline `fmt.Errorf`.
 
