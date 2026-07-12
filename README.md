@@ -58,58 +58,159 @@ e2e-testing-service/
 
 ## Prerequisites
 
-- **Go 1.23+**
+- **Go 1.25**
 - **Docker & Docker Compose** (for Redis and containerized deployment)
 
 ---
 
-## Generate Mocks
+## Getting Started
+
+Follow these steps to go from clone to a running end-to-end test:
+
+### 1. Clone and install dependencies
 
 ```bash
-go install github.com/golang/mock/mockgen
+git clone https://github.com/your-org/e2e-framework.git
+cd e2e-framework
+go mod download
 ```
 
-```bash
-make mocks
+### 2. Create environment variables
+
+The service resolves `{{env.VAR_NAME}}` placeholders in `configs/config.yaml`
+and test YAML files using OS environment variables at startup.
+
+Create a `.env` file in the project root (already in `.gitignore`):
+
+```dotenv
+# Redis (required)
+REDIS_URL=redis://localhost:6379
+
+# JWT authentication secret
+# (required even when auth.enabled: false, because the config parser
+# resolves {{env.JWT_SECRET}} at load time)
+JWT_SECRET=dev-secret-change-me
+
+# IMAP credentials (only needed for tests using the imap receiver)
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_USERNAME=you@gmail.com
+IMAP_PASSWORD=your-app-password
+
+# Webhook base URL (only needed for webhook-based receiver tests)
+WEBHOOK_BASE_URL=http://localhost:8081
 ```
 
-## Quick Start
+> **Tip:** Export the variables in your shell (`source .env` won't work on
+> most shells — use `export $(grep -v '^#' .env | xargs)` or load them via
+> your IDE).
 
-### Local Development
+### 3. Start Redis
+
+The service requires a running Redis instance. If you don't have Redis
+installed locally, use Docker:
 
 ```bash
-# Build the service
-make build
+docker run -d --name e2e-redis -p 6379:6379 redis:7-alpine
+```
 
-# Run unit tests
+Alternatively, `make docker-up` starts both Redis **and** the service in
+containers (see [Docker](#docker) below).
+
+### 4. Start the server
+
+```bash
+make run
+```
+
+This compiles the binary (`bin/e2e-testing-service`) and starts it. The API
+server listens on **port 8082** and the webhook ingestion server on
+**port 8081** (configurable in `configs/config.yaml`).
+
+### 5. Verify the server is running
+
+```bash
+curl http://localhost:8082/health
+# → {"status":"ok"}
+```
+
+`/health` is the only endpoint that doesn't require authentication.
+
+### 6. Run a test
+
+The simplest self-contained test is `local_loop_test`. It triggers the
+project's own webhook server and verifies the `request` receiver picks up
+the message — no external services needed beyond Redis:
+
+```bash
+curl -X POST "http://localhost:8082/run?id=local_loop_test"
+```
+
+### 7. Check the result
+
+```bash
+curl http://localhost:8082/results
+```
+
+You'll see a JSON array with the test result including `status`, `run_id`,
+`attempts`, and per-receiver outcomes.
+
+---
+
+### Quick Reference
+
+```bash
+# Unit tests
 make test
 
-# Run integration tests (requires Redis)
+# Integration tests (requires Redis running locally)
 make test-integration
 
-# Lint the code
+# Lint
 make lint
-```
 
-### Docker
-
-```bash
-# Start the service and Redis
+# Start everything in Docker (Redis + service)
 make docker-up
 
-# Stop all services
+# Stop Docker services
 make docker-down
 ```
 
 ### API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET`  | `/health` | Liveness check |
-| `POST` | `/run?id={test_id}` | Trigger a specific test (sync or async depending on YAML) |
-| `GET`  | `/results` | All stored test results (last 100) |
-| `GET`  | `/results/{run_id}` | Result for a specific run (supports polling for async) |
-| `GET`  | `/swagger/` | Interactive API documentation (Swagger UI) |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET`  | `/health` | No | Liveness check |
+| `POST` | `/run?id={test_id}` | Yes | Trigger a specific test |
+| `GET`  | `/results` | Yes | All stored test results (last 100) |
+| `GET`  | `/results/{run_id}` | Yes | Result for a specific run (poll for async) |
+| `GET`  | `/swagger/` | Yes | Interactive API docs (Swagger UI) |
+
+### Authentication
+
+All endpoints except `/health` require a JWT in the `Authorization` header
+when `auth.enabled: true` (the default):
+
+```bash
+curl -H "Authorization: Bearer any-non-empty-token" \
+     -X POST "http://localhost:8082/run?id=local_loop_test"
+```
+
+> **Current behavior:** The middleware only checks that the `Bearer` token is
+> present and non-empty. It does **not** validate the token's signature,
+> expiration, or claims yet. Any non-empty string works as a token. Full JWT
+> validation is planned (see Roadmap item #3).
+
+**To disable authentication for local development**, set this in
+`configs/config.yaml`:
+
+```yaml
+auth:
+  enabled: false
+```
+
+Then you can call the API without any `Authorization` header. The `/health`
+endpoint never requires auth regardless of this setting.
 
 ---
 
@@ -126,6 +227,58 @@ swag init -g cmd/server/main.go
 ```
 
 The documentation will be available at `/swagger/index.html` when the service is running.
+
+---
+
+## Development Workflow
+
+### When do I need `make mocks`?
+
+The mock files in `internal/core/ports/mocks/` are already committed to the
+repo. You do **not** need to regenerate them for normal development.
+
+Regenerate mocks only when you **add or modify interfaces** in
+`internal/core/ports/`:
+
+```bash
+# Requires mockgen (already in go.mod as go.uber.org/mock)
+make mocks
+```
+
+> **Note:** The current `make mocks` target runs `go generate` but the port
+> files don't have `//go:generate` directives yet, so the command is a no-op
+> in the current state. To make it work, add `//go:generate` lines to each
+> port file, or run `mockgen` directly as documented in each mock file's
+> header comment.
+
+### When do I need `swag init`?
+
+Swagger docs in `docs/` are already committed. Regenerate them only when you
+**add or modify HTTP endpoint annotations** (the `// @Router` comments in
+`internal/adapters/primary/http/server.go`):
+
+```bash
+swag init -g cmd/server/main.go
+```
+
+This updates `docs/docs.go`, `docs/swagger.json`, and `docs/swagger.yaml`.
+
+### `make build` vs `make docker-up`
+
+| | `make build` + `make run` | `make docker-up` |
+|---|---|---|
+| **What runs** | Native binary on your machine | Docker containers (Alpine) |
+| **Redis** | You must start it yourself | Included in compose |
+| **Speed** | Fast startup, fast rebuild | Slower (image build + container boot) |
+| **Best for** | Day-to-day development, debugging | Verifying production-like behavior, CI |
+| **Env vars** | Load from `.env` / shell | Set in `docker-compose.yml` |
+
+For daily development: `make run` + Redis via Docker. For verifying the
+container build works: `make docker-up`.
+
+> **Note:** The `Dockerfile` has `EXPOSE 8080` which is inconsistent with the
+> actual default port `8082` in `configs/config.yaml`. The `docker-compose.yml`
+> correctly maps `8082:8082`.
 
 ---
 
@@ -286,18 +439,70 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for a 5-step guide.
 ## Configuration
 
 Global configuration lives in `configs/config.yaml`. Secrets are injected via
-environment variables using the `{{env.VAR_NAME}}` syntax.
+environment variables using the `{{env.VAR_NAME}}` syntax. The config loader
+resolves these placeholders **before** YAML parsing, so the parser always sees
+plain values.
 
-Required environment variables:
+### Full config reference
 
-| Variable        | Description                   |
-|-----------------|-------------------------------|
-| `REDIS_URL`     | Redis connection URL          |
-| `JWT_SECRET`    | Jwt authentication secret     |
-| `IMAP_HOST`     | Imap service host             |
-| `IMAP_PORT`     | Imap service port             |
-| `IMAP_USERNAME` | Imap service username         |
-| `IMAP_PASSWORD` | Imap service password         |
+```yaml
+# configs/config.yaml
+
+version: "1"
+
+server:
+  port: 8082           # HTTP API port
+  timeout: 30s
+
+auth:
+  enabled: true        # Set to false for local development to skip JWT
+  jwt_secret: "{{env.JWT_SECRET}}"
+
+webhook:
+  port: 8081           # Webhook ingestion server port (Twilio, Meta, etc.)
+
+store:
+  redis:
+    url: "{{env.REDIS_URL}}"
+    ttl: 300s          # How long received messages are kept
+
+scheduler:
+  enabled: true
+  timezone: "Europe/Madrid"
+
+tests:
+  path: "./tests"      # Directory containing YAML test definitions
+
+receivers:
+  sms:
+    provider: twilio
+    # fields TBD during SmsReceiver implementation
+  push:
+    provider: fcm
+    # fields TBD during PushReceiver implementation
+  webhook:
+    base_url: "{{env.WEBHOOK_BASE_URL}}"
+
+logging:
+  level: info           # debug | info | warn | error
+  format: json          # json (production) | text (local)
+```
+
+### Environment variables
+
+| Variable | Required | Used in | Description |
+|----------|----------|---------|-------------|
+| `REDIS_URL` | Yes | `config.yaml` | Redis connection URL (e.g. `redis://localhost:6379`) |
+| `JWT_SECRET` | Yes | `config.yaml` | Shared secret for JWT signing/validation |
+| `WEBHOOK_BASE_URL` | No | `config.yaml` | Base URL for webhook receiver callbacks |
+| `IMAP_HOST` | No | Test YAMLs | IMAP server hostname for email tests |
+| `IMAP_PORT` | No | Test YAMLs | IMAP server port (typically `993`) |
+| `IMAP_USERNAME` | No | Test YAMLs | IMAP login username/email |
+| `IMAP_PASSWORD` | No | Test YAMLs | IMAP login password or app password |
+| `API_TOKEN` | No | Test YAMLs | Bearer token for APIs called by test triggers |
+
+> **Note:** The `{{env.*}}` syntax works in both `configs/config.yaml` and
+> individual test YAML files in `tests/`. The same resolver handles both.
 
 ---
 
