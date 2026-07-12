@@ -72,66 +72,7 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 		return result
 	}
 
-	reserved, err := o.reserveRecipients(ctx, def.Receivers, runID)
-	if err != nil {
-		o.failResult(result, err.Error())
-
-		return result
-	}
-
-	defer o.releaseRecipients(ctx, reserved)
-
-	maxAttempts := 1
-	if def.Retry.Enabled && def.Retry.Attempts > 1 {
-		maxAttempts = def.Retry.Attempts
-	}
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if attempt > 1 {
-			log.Printf("[%s] retrying (attempt %d/%d) after previous failure", runID, attempt, maxAttempts)
-		}
-
-		o.resetAttempt(result, attempt, def.Receivers)
-
-		active, err := o.startReceivers(ctx, def.Receivers, runID)
-		if err != nil {
-			o.failResult(result, err.Error())
-			o.stopReceivers(active)
-
-			break
-		}
-
-		triggerVars, err := o.trigger.Execute(ctx, def.Trigger, runID)
-		if err != nil {
-			o.failResult(result, fmt.Sprintf("trigger failed: %v", err))
-			o.stopReceivers(active)
-
-			if attempt < maxAttempts {
-				time.Sleep(def.Retry.Delay)
-			}
-
-			continue
-		}
-
-		if triggerVars == nil {
-			triggerVars = make(map[string]string)
-		}
-
-		triggerVars["run_id"] = runID
-
-		result.TriggerVars = triggerVars
-
-		o.collectAll(ctx, runID, active, triggerVars, result)
-		o.stopReceivers(active)
-
-		if result.Status == domain.StatusPassed {
-			break
-		}
-
-		if attempt < maxAttempts {
-			time.Sleep(def.Retry.Delay)
-		}
-	}
+	o.executeSequential(ctx, def, runID, result)
 
 	result.FinishedAt = time.Now()
 	result.DurationMs = result.FinishedAt.Sub(startTime).Milliseconds()
@@ -141,6 +82,88 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 	}
 
 	return result
+}
+
+func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDefinition, runID string, result *domain.TestResult) {
+	triggerVars := make(map[string]string)
+	triggerVars["run_id"] = runID
+
+	for i, triggerStep := range def.Triggers {
+		reserved, err := o.reserveRecipients(ctx, triggerStep.Receivers, runID)
+		if err != nil {
+			o.failResult(result, err.Error())
+
+			return
+		}
+
+		defer o.releaseRecipients(ctx, reserved)
+
+		stepMaxAttempts := 1
+		if def.Retry.Enabled && def.Retry.Attempts > 1 {
+			stepMaxAttempts = def.Retry.Attempts
+		}
+
+		stepPassed := false
+
+		for attempt := 1; attempt <= stepMaxAttempts; attempt++ {
+			if attempt > 1 {
+				log.Printf("[%s] step %d retrying (attempt %d/%d)", runID, i+1, attempt, stepMaxAttempts)
+			}
+
+			stepVars, triggerErr := o.trigger.Execute(ctx, triggerStep, runID, triggerVars)
+			if triggerErr != nil {
+				o.failResult(result, fmt.Sprintf("step %d trigger failed: %v", i+1, triggerErr))
+
+				if attempt < stepMaxAttempts {
+					time.Sleep(def.Retry.Delay)
+				}
+
+				continue
+			}
+
+			if stepVars == nil {
+				stepVars = make(map[string]string)
+			}
+
+			for k, v := range stepVars {
+				triggerVars[k] = v
+			}
+
+			if !triggerStep.WaitForReceivers || len(triggerStep.Receivers) == 0 {
+				stepPassed = true
+
+				break
+			}
+
+			active, startErr := o.startReceivers(ctx, triggerStep.Receivers, runID)
+			if startErr != nil {
+				o.failResult(result, fmt.Sprintf("step %d receiver start failed: %v", i+1, startErr))
+
+				break
+			}
+
+			o.collectAndAssertAll(ctx, runID, active, triggerVars, result, i)
+			o.stopReceivers(active)
+
+			if result.Status == domain.StatusPassed {
+				stepPassed = true
+
+				break
+			}
+
+			if attempt < stepMaxAttempts {
+				time.Sleep(def.Retry.Delay)
+			}
+		}
+
+		if !stepPassed && result.Status != domain.StatusPassed {
+			return
+		}
+
+		result.Status = domain.StatusPassed
+	}
+
+	result.TriggerVars = triggerVars
 }
 
 func (o *Orchestrator) reserveRecipients(ctx context.Context, configs []domain.ReceiverConfig, runID string) ([]domain.ReceiverConfig, error) {
@@ -192,7 +215,7 @@ func (o *Orchestrator) stopReceivers(active []activeReceiver) {
 	}
 }
 
-func (o *Orchestrator) collectAll(ctx context.Context, runID string, active []activeReceiver, triggerVars map[string]string, result *domain.TestResult) {
+func (o *Orchestrator) collectAndAssertAll(ctx context.Context, runID string, active []activeReceiver, triggerVars map[string]string, result *domain.TestResult, triggerIndex int) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
@@ -205,6 +228,7 @@ func (o *Orchestrator) collectAll(ctx context.Context, runID string, active []ac
 			rcvStart := time.Now()
 			rcvResult := o.collectAndAssert(ctx, runID, rcfg, instance, triggerVars)
 			rcvResult.DurationMs = time.Since(rcvStart).Milliseconds()
+			rcvResult.TriggerIndex = triggerIndex
 
 			mu.Lock()
 
@@ -221,14 +245,6 @@ func (o *Orchestrator) collectAll(ctx context.Context, runID string, active []ac
 	}
 
 	wg.Wait()
-}
-
-func (o *Orchestrator) resetAttempt(result *domain.TestResult, attempt int, configs []domain.ReceiverConfig) {
-	result.Attempts = attempt
-	result.Receivers = make([]domain.ReceiverResult, 0, len(configs))
-	result.Status = domain.StatusPassed
-	result.Error = ""
-	result.TriggerVars = nil
 }
 
 func (o *Orchestrator) collectAndAssert(

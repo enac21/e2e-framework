@@ -9,18 +9,18 @@ retry:
   attempts: 3
   delay: 5s
 
-trigger:
-  method: POST
-  # Hit our own Webhook Server on port 8081 for the "twilio" extractor
-  url: "http://localhost:8081/webhook/twilio"
-  headers:
-    Content-Type: "application/x-www-form-urlencoded"
-  body:
-    From: "+123456"
-    To: "+987654"
-    Body: "{{run_id}}"
-#  extract:
-#    extracted_from: "test_id"
+triggers:
+  - method: POST
+    # Hit our own Webhook Server on port 8081 for the "twilio" extractor
+    url: "http://localhost:8081/webhook/twilio"
+    headers:
+      Content-Type: "application/x-www-form-urlencoded"
+    body:
+      From: "+123456"
+      To: "+987654"
+      Body: "{{run_id}}"
+  # extract:
+  #   extracted_from: "test_id"
 
 receivers:
   - type: request
@@ -28,5 +28,5 @@ receivers:
     assertions:
       - type: equals
         field: from
-#        value: "{{extracted_from}}"
+        #value: "{{extracted_from}}"
         value: "+123456"

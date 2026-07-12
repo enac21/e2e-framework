@@ -1,9 +1,8 @@
 # Example test definition: Welcome email verification.
 # This test triggers a user registration API call and verifies that
 # the expected welcome email arrives with the correct content.
-
 version: "1"
-id: welcome_email
+id: example_welcome_email
 description: "Verifies that a welcome email is sent after user registration with correct subject, body, and sender."
 
 schedule: "*/5 * * * *"
@@ -14,38 +13,38 @@ retry:
   attempts: 2
   delay: 10s
 
-trigger:
-  method: POST
-  url: "https://api.service.com/users"
-  timeout: 10s
-  headers:
-    Content-Type: application/json
-    Authorization: "Bearer {{env.API_TOKEN}}"
-  body:
-    email: "test@domain.com"
-    templateData:
-      message_id: "{{run_id}}"
-
-receivers:
-  - type: imap
-    timeout: 60s
-    options:
-      host: "{{env.IMAP_HOST}}"
-      port: "{{env.IMAP_PORT}}"
-      username: "{{env.IMAP_USERNAME}}"
-      password: "{{env.IMAP_PASSWORD}}"
-      mailbox: INBOX
-      tls: true
-    assertions:
-      - type: contains
-        field: subject
-        value: "Welcome"
-      - type: contains
-        field: body
-        value: "{{run_id}}"
-      - type: equals
-        field: from
-        value: "noreply@company.com"
+triggers:
+  - method: POST
+    url: "https://api.service.com/users"
+    timeout: 10s
+    headers:
+      Content-Type: application/json
+      Authorization: "Bearer {{env.API_TOKEN}}"
+    body:
+      email: "test@domain.com"
+      templateData:
+        message_id: "{{run_id}}"
+    receivers:
+      - type: imap
+        timeout: 60s
+        options:
+          host: "{{env.IMAP_HOST}}"
+          port: "{{env.IMAP_PORT}}"
+          username: "{{env.IMAP_USERNAME}}"
+          password: "{{env.IMAP_PASSWORD}}"
+          mailbox: INBOX
+          tls: true
+        assertions:
+          - type: contains
+            field: subject
+            value: "Welcome"
+          - type: contains
+            field: body
+            value: "{{run_id}}"
+          - type: equals
+            field: from
+            value: "noreply@company.com"
+    wait_for_receivers: true
 
 on_failure:
   webhook:

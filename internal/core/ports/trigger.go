@@ -7,5 +7,5 @@ import (
 )
 
 type Trigger interface {
-	Execute(ctx context.Context, def domain.TriggerConfig, runID string) (map[string]string, error)
+	Execute(ctx context.Context, def domain.TriggerConfig, runID string, vars map[string]string) (map[string]string, error)
 }

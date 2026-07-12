@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format follows a chronological order, newest changes first.
 
 ---
+## [2026-07-11] — Unified Triggers (Multiple Steps)
+
+- **Unified syntax**: `TestDefinition.Triggers []TriggerConfig` (YAML key: `triggers`) is the only supported syntax. Each trigger groups an HTTP call with its own receivers and a `wait_for_receivers` flag.
+- **Breaking change**: The legacy `trigger:` + top-level `receivers:` syntax has been removed. All test definitions must use `triggers:` (plural) with receivers inline per trigger.
+- **Orchestrator simplified**: `execute()` always delegates to `executeSequential()`. The legacy code path has been removed. Retry logic applies per trigger.
+- **`wait_for_receivers` flag**: When `true`, the orchestrator starts the trigger's receivers, executes the HTTP call, collects and asserts before moving to the next trigger. When `false`, only the HTTP call fires and variables are extracted.
+- **Variable accumulation**: Variables extracted in earlier triggers are available in later triggers via `{{variable_name}}`.
+- **Result enrichment**: `ReceiverResult` now includes `TriggerIndex int` field to identify which trigger produced the result.
+
+---
 ## [2026-05-12] — Roadmap update and Domain Error Wrapper
 
 - **Documentation**: Updated `README.md` roadmap. Reformulated observability to point 9 as "Production-Ready Console Logging System", and added point 10 "Comprehensive Documentation & YAML Reference".

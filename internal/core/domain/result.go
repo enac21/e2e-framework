@@ -13,11 +13,12 @@ const (
 )
 
 type ReceiverResult struct {
-	Type       string
-	Status     RunStatus
-	DurationMs int64
-	Error      string
-	Message    *Message
+	Type         string
+	TriggerIndex int
+	Status       RunStatus
+	DurationMs   int64
+	Error        string
+	Message      *Message
 }
 
 type TestResult struct {
