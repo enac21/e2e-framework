@@ -1,0 +1,35 @@
+# Test: Crear producto y verificar que existe
+# 1. POST /productos → crea producto, extrae id
+# 2. GET /productos/{id} → verifica que el producto específico existe
+
+version: "1"
+id: crear_y_verificar_producto
+description: "Crea un producto via POST y verifica que aparece en el listado via GET"
+
+enabled: true
+async: false
+
+retry:
+  enabled: true
+  attempts: 2
+  delay: 3s
+
+triggers:
+  - method: POST
+    url: "http://localhost:8080/productos"
+    timeout: 10s
+    headers:
+      Content-Type: application/json
+    body:
+      nombre: "Teclado mecánico"
+      descripcion: "Switches rojos"
+      precio: 100.99
+    extract:
+      id: "id"
+
+  - method: GET
+    url: "http://localhost:8080/productos/{{id}}"
+    timeout: 10s
+    extract:
+      nombre: "nombre"
+      precio: "precio"

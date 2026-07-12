@@ -2,7 +2,7 @@ services:
   e2e-service:
     build: .
     ports:
-      - "8080:8080"
+      - "8082:8082"
     environment:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info

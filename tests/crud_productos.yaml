@@ -1,0 +1,64 @@
+# Test: CRUD completo de productos
+# 1. POST /productos → crea producto, extrae id
+# 2. GET /productos/{id} → verifica que existe
+# 3. PUT /productos/{id} → actualiza el producto
+# 4. GET /productos/{id} → verifica la actualización
+# 5. DELETE /productos/{id} → elimina el producto
+
+version: "1"
+id: crud_productos
+description: "CRUD completo: crear, consultar, actualizar y eliminar un producto"
+
+enabled: true
+async: false
+
+retry:
+  enabled: true
+  attempts: 2
+  delay: 3s
+
+triggers:
+  # 1. Crear producto
+  - method: POST
+    url: "http://localhost:8080/productos"
+    timeout: 10s
+    headers:
+      Content-Type: application/json
+    body:
+      nombre: "Teclado mecánico"
+      descripcion: "Switches rojos"
+      precio: 59.99
+    extract:
+      id: "id"
+
+  # 2. Verificar que fue creado
+  - method: GET
+    url: "http://localhost:8080/productos/{{id}}"
+    timeout: 10s
+    extract:
+      nombre: "nombre"
+      precio: "precio"
+
+  # 3. Actualizar producto
+  - method: PUT
+    url: "http://localhost:8080/productos/{{id}}"
+    timeout: 10s
+    headers:
+      Content-Type: application/json
+    body:
+      nombre: "Teclado mecánico RGB"
+      descripcion: "Switches rojos con luces"
+      precio: 79.99
+
+  # 4. Verificar actualización
+  - method: GET
+    url: "http://localhost:8080/productos/{{id}}"
+    timeout: 10s
+    extract:
+      nombre: "nombre"
+      precio: "precio"
+
+  # 5. Eliminar producto
+  - method: DELETE
+    url: "http://localhost:8080/productos/{{id}}"
+    timeout: 10s

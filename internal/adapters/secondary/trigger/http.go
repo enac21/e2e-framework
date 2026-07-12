@@ -25,10 +25,11 @@ func NewHTTPTrigger() *HTTPTrigger {
 	}
 }
 
-func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, runID string) (map[string]string, error) {
-	vars := map[string]string{
-		"run_id": runID,
+func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, runID string, vars map[string]string) (map[string]string, error) {
+	if vars == nil {
+		vars = make(map[string]string)
 	}
+	vars["run_id"] = runID
 
 	targetURL := template.ReplaceString(def.URL, vars)
 	method := def.Method

@@ -142,45 +142,61 @@ schedule: "*/5 * * * *"
 enabled: true
 async: false
 
-trigger:
-  method: POST
-  url: "https://api.example.com/endpoint"
-  timeout: 10s
-  headers:
-    Content-Type: application/json
-  body:
-    message_id: "{{run_id}}"
-  extract:
-    transaction_id: "data.id"
-
-receivers:
-  - type: imap
-    timeout: 60s
-    options:
-      host: imap.gmail.com
-      port: "993"
-      username: test@gmail.com
-      password: secret
-      mailbox: INBOX
-      tls: true
-    assertions:
-      - type: contains
-        field: subject
-        value: "Welcome"
-  - type: request
-    timeout: 60s
-    assertions:
-      - type: contains
-        field: subject
-        value: "Welcome"
+triggers:
+  - method: POST
+    url: "https://api.example.com/endpoint"
+    timeout: 10s
+    headers:
+      Content-Type: application/json
+    body:
+      message_id: "{{run_id}}"
+    extract:
+      transaction_id: "data.id"
+    receivers:
+      - type: imap
+        timeout: 60s
+        options:
+          host: imap.gmail.com
+          port: "993"
+          username: test@gmail.com
+          password: secret
+          mailbox: INBOX
+          tls: true
+        assertions:
+          - type: contains
+            field: subject
+            value: "Welcome"
+      - type: request
+        timeout: 60s
+        assertions:
+          - type: contains
+            field: subject
+            value: "Welcome"
+    wait_for_receivers: true
+  
+  - method: GET
+    url: "http://localhost:8080/notifications/{{notification_id}}"
+    timeout: 10s
+    extract:
+      status: "status"
+    receivers:
+      - type: request
+        timeout: 15s
+        assertions:
+          - type: equals
+            field: status
+            value: "delivered"
+    wait_for_receivers: true
 
 on_failure:
   webhook:
     url: "https://hooks.slack.com/services/XXX"
     method: POST
     body:
-      text: "🚨 Test {{test_id}} failed: {{error}}"
+      text: "Test {{test_id}} failed: {{error}}"
 ```
+
+> For tests that need multiple HTTP calls in order (e.g., create then verify), add more items to the `triggers` list. Each trigger can have its own receivers and a `wait_for_receivers` flag
 
 ### Dynamic Variables
 
@@ -189,6 +205,38 @@ You can dynamically inject values across your test definition using the `{{varia
 - **Trigger Extraction**: If your trigger hits an API that returns JSON, you can use the `extract` block to map JSON paths (using dot-notation, like `data.id`) to variable names (like `transaction_id`). You can then use these variables in your assertions (e.g., `value: "{{transaction_id}}"`) to validate dynamic runtime data.
 
 See `tests/example_welcome_email.yaml` for a complete example.
+
+### Extract Variables
+
+The `extract` block inside a trigger lets you capture values from the HTTP response body and store them as variables for use in subsequent triggers. The syntax is a map where:
+
+- **Key** = custom variable name (what you choose)
+- **Value** = JSON path to extract (dot-notation supported)
+
+```yaml
+triggers:
+  - method: POST
+    url: "https://api.example.com/users"
+    body:
+      name: "Alice"
+    extract:
+      user_id: "id"
+      full_name: "name"
+      org_slug: "organization.slug"
+```
+
+This creates variables `{{user_id}}`, `{{full_name}}`, and `{{org_slug}}` that can be used in later triggers:
+
+```yaml
+  - method: GET
+    url: "https://api.example.com/organizations/{{org_slug}}/members/{{user_id}}"
+```
+
+**Rules:**
+- Variable names are free-form — use descriptive names like `product_id`, `transaction_id`, etc.
+- JSON paths are case-insensitive
+- If the path doesn't exist in the response, the variable is silently omitted
+- All extracted variables accumulate across triggers — earlier extractions are available in later ones
 
 ### Receiver Options
 
@@ -269,26 +317,32 @@ A shared `auth.jwt_secret` (env var `JWT_SECRET`) is used to sign and validate J
 ### ✅ 4. IMAP Receiver Implementation
 The `IMAPReceiver` skeleton and `ports.IMAPClient` interface already exist. The remaining work is implementing `internal/adapters/secondary/imap_client/client.go` using `github.com/emersion/go-imap/v2`, wiring `Connect`, `SearchByRunID` and `Disconnect`, and removing the `TODO` blanks in the receiver.
 
-### 5. Hexagonal Architecture — IngestUseCase Port (Tech Debt)
+### ✅ 5. Multiple & Sequential Triggers
+Tests can now define multiple triggers in order using the `triggers` key. Each trigger groups an HTTP call with its own receivers and a `wait_for_receivers` flag. Variables extracted in earlier triggers accumulate and are available in later triggers.
+
+### 6. Trigger Response Assertions
+Allow asserting fields directly against the HTTP response body of a trigger, without requiring a receiver. Useful for verifying that a GET returns expected data, a POST returns a valid ID, or a list contains a specific element. Proposal: add a `response_assertions` block to `TriggerConfig` with the same assertion types used in receivers (`equals`, `contains`, `matches`, `present`).
+
+### 7. Hexagonal Architecture — IngestUseCase Port (Tech Debt)
 The `WebhookServer` currently calls `store.Deposit` directly, bypassing the domain layer. A `ports.MessageIngestor` interface and `services.Ingestor` use case should be introduced so all ingestion logic (validation, enrichment, routing) has a single place.
 
-### 6. Dynamic Hot-Reload
+### 8. Dynamic Hot-Reload
 Test YAML files are loaded once at startup. Use `fsnotify` to reload `tests/*.yaml` on change (local mode) or expose a `POST /system/reload` endpoint for CI/CD and Git webhook integration.
 
-### 7. Result Persistence
+### 9. Result Persistence
 Replace the in-memory `map[string]*domain.TestResult` (max 100 entries, lost on restart) with a durable store. Proposed: Redis with a JSON blob per `run_id` plus a `ZSET` for chronological listing, and a configurable TTL.
 
-### 8. Improve API JSON Response Messages
+### 10. Improve API JSON Response Messages
 Standardise all error responses to return `Content-Type: application/json` with a consistent body:
 ```json
 { "code": 401, "message": "unauthorized" }
 ```
 Currently `http.Error` returns `text/plain`, which is inconsistent with the JSON success responses.
 
-### 9. Production-Ready Console Logging System
+### 11. Production-Ready Console Logging System
 Implement a reworked, structured logging system (e.g., using `log/slog`) that outputs strictly to standard console (stdout/stderr). This ensures logs are properly captured, parseable, and fully functional when the project is deployed in production environments like containers, Kubernetes, or any other cloud-native orchestrator.
 
-### 10. Comprehensive Documentation & YAML Reference
+### 12. Comprehensive Documentation & YAML Reference
 Review and enhance the `README.md` documentation. The primary goal is to thoroughly document each feature and rule of the framework strictly from the perspective of the YAML configuration file, providing clear examples and use cases for end-users to understand how to leverage all capabilities.
 
 ---

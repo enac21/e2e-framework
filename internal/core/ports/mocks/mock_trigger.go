@@ -42,16 +42,16 @@ func (m *MockTrigger) EXPECT() *MockTriggerMockRecorder {
 }
 
 // Execute mocks base method.
-func (m *MockTrigger) Execute(ctx context.Context, def domain.TriggerConfig, runID string) (map[string]string, error) {
+func (m *MockTrigger) Execute(ctx context.Context, def domain.TriggerConfig, runID string, vars map[string]string) (map[string]string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Execute", ctx, def, runID)
+	ret := m.ctrl.Call(m, "Execute", ctx, def, runID, vars)
 	ret0, _ := ret[0].(map[string]string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Execute indicates an expected call of Execute.
-func (mr *MockTriggerMockRecorder) Execute(ctx, def, runID any) *gomock.Call {
+func (mr *MockTriggerMockRecorder) Execute(ctx, def, runID, vars any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Execute", reflect.TypeOf((*MockTrigger)(nil).Execute), ctx, def, runID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Execute", reflect.TypeOf((*MockTrigger)(nil).Execute), ctx, def, runID, vars)
 }
