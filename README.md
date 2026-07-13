@@ -47,7 +47,7 @@ e2e-testing-service/
 │   └── adapters/
 │       ├── primary/                # HTTP API, webhook server, cron
 │       └── secondary/              # Trigger, receivers, assertions, store, notifier
-├── tests/                          # YAML test definitions
+├── tests/                          # YAML test definitions (subdirectories supported)
 ├── configs/config.yaml             # Global configuration
 ├── docker-compose.yml              # Redis + service
 ├── Dockerfile                      # Multi-stage build
@@ -284,7 +284,7 @@ container build works: `make docker-up`.
 
 ## Adding a New Test
 
-Create a YAML file in the `tests/` directory. No code changes required:
+Create a YAML file in `tests/` or any subdirectory. No code changes required:
 
 ```yaml
 version: "1"
@@ -299,6 +299,7 @@ triggers:
   - method: POST
     url: "https://api.example.com/endpoint"
     timeout: 10s
+    expected_status: 201
     headers:
       Content-Type: application/json
     body:
@@ -390,6 +391,137 @@ This creates variables `{{user_id}}`, `{{full_name}}`, and `{{org_slug}}` that c
 - JSON paths are case-insensitive
 - If the path doesn't exist in the response, the variable is silently omitted
 - All extracted variables accumulate across triggers — earlier extractions are available in later ones
+
+### Status Code Assertions
+
+By default, any HTTP 4xx or 5xx response from a trigger causes the test step to fail immediately. Use `expected_status` to explicitly assert that a specific status code is returned — this is required for error-path tests where a 4xx response is the correct outcome.
+
+```yaml
+triggers:
+  # Happy path: assert a resource was created with 201
+  - method: POST
+    url: "https://api.example.com/users"
+    expected_status: 201
+    headers:
+      Content-Type: application/json
+    body:
+      name: "Alice"
+    extract:
+      user_id: "id"
+
+  # Error path: missing required field must return 400
+  - method: POST
+    url: "https://api.example.com/users"
+    expected_status: 400
+    headers:
+      Content-Type: application/json
+    body:
+      # name field intentionally omitted
+
+  # Error path: wrong user accessing a resource must return 404
+  - method: GET
+    url: "https://api.example.com/users/{{user_id}}"
+    expected_status: 404
+    headers:
+      Authorization: "Bearer {{env.OTHER_USER_TOKEN}}"
+```
+
+**Rules:**
+- When `expected_status` is set, the step passes **only** if the response status matches exactly. Any other code — including 2xx — fails the step.
+- When `expected_status` is omitted (default `0`), the original behavior applies: any 4xx/5xx fails the step, any 2xx/3xx passes.
+- `extract` still works when `expected_status` matches a 4xx/5xx — the response body is parsed as JSON and fields can be captured (useful for inspecting error payloads).
+
+### Response Assertions
+
+Use `response_assertions` inside a trigger to validate fields in the HTTP response body directly — no receiver needed. This is useful for verifying that a creation returned a valid ID, a GET returned expected data, or an error response has a specific code.
+
+**Assertion types:**
+
+| Type | `field` syntax | Passes when |
+|------|---------------|-------------|
+| `equals` | dot-path | value is exactly `value` |
+| `contains` | dot-path | value contains `value` as a substring |
+| `not_contains` | dot-path | value does not contain `value` |
+| `present` | dot-path | field exists and is non-empty |
+| `matches` | dot-path | value matches the `value` regex pattern |
+| `array_contains` | `array[].nested.path` | any element in the array has the nested field equal to `value` |
+| `length` | dot-path to array | array has exactly `value` elements |
+
+```yaml
+triggers:
+  - method: POST
+    url: "https://api.example.com/orders"
+    headers:
+      Content-Type: application/json
+    body:
+      product: "widget"
+      quantity: 3
+    extract:
+      order_id: "id"
+    response_assertions:
+      - type: present
+        field: "id"
+      - type: equals
+        field: "status"
+        value: "pending"
+      - type: contains
+        field: "product"
+        value: "widget"
+      - type: matches
+        field: "created_at"
+        value: "^\d{4}-\d{2}-\d{2}"
+      - type: not_contains
+        field: "error"
+        value: "failed"
+
+  # Subsequent trigger can use the extracted order_id
+  - method: GET
+    url: "https://api.example.com/orders/{{order_id}}"
+    response_assertions:
+      - type: equals
+        field: "id"
+        value: "{{order_id}}"
+      - type: equals
+        field: "status"
+        value: "pending"
+      - type: array_contains
+        field: "orders[].address.city"
+        value: "Madrid"
+      - type: length
+        field: "notifications"
+        value: "2"
+```
+
+### Step Delay
+
+Use `delay_before` on any trigger step to pause execution for a fixed duration before that step fires. Useful when an upstream service processes events asynchronously and the verify step needs to wait for propagation.
+
+```yaml
+triggers:
+  # Step 1: Create resource via async service
+  - method: POST
+    url: "{{env.GCM_BASE_URL}}/v1/inbox/notifications"
+    headers:
+      Authorization: "Bearer {{env.GCM_TOKEN}}"
+    body:
+      user_id: "abc-123"
+    extract:
+      notification_id: "id"
+
+  # Step 2: Wait 3s for async processing, then verify
+  - method: GET
+    url: "{{env.INBOX_BASE_URL}}/v1/abc-123/notifications/{{notification_id}}"
+    delay_before: 3s
+    expected_status: 200
+    headers:
+      Authorization: "Bearer {{env.INBOX_TOKEN}}"
+```
+
+**Rules:**
+- `delay_before` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
+- The delay runs **once per step** — before the first attempt. Retries do not repeat the delay (they use `retry.delay` instead).
+- Omitting `delay_before` (or setting it to `0`) skips the delay entirely.
+- The delay is logged: `[run-id] step N waiting Xs before execution`.
 
 ### Receiver Options
 
@@ -525,8 +657,11 @@ The `IMAPReceiver` skeleton and `ports.IMAPClient` interface already exist. The 
 ### ✅ 5. Multiple & Sequential Triggers
 Tests can now define multiple triggers in order using the `triggers` key. Each trigger groups an HTTP call with its own receivers and a `wait_for_receivers` flag. Variables extracted in earlier triggers accumulate and are available in later triggers.
 
-### 6. Trigger Response Assertions
-Allow asserting fields directly against the HTTP response body of a trigger, without requiring a receiver. Useful for verifying that a GET returns expected data, a POST returns a valid ID, or a list contains a specific element. Proposal: add a `response_assertions` block to `TriggerConfig` with the same assertion types used in receivers (`equals`, `contains`, `matches`, `present`).
+### ✅ 6. Trigger Response Assertions
+Each trigger now supports two assertion mechanisms that run directly against the HTTP response — no receiver required:
+
+- **`expected_status`** — asserts the response status code matches exactly. Enables error-path testing where a 4xx/5xx is the correct outcome. See [Status Code Assertions](#status-code-assertions).
+- **`response_assertions`** — asserts fields in the JSON response body using the same assertion types as receivers (`equals`, `contains`, `not_contains`, `present`, `matches`). Field paths use dot-notation and are case-insensitive. Values support `{{variable}}` substitution. See [Response Assertions](#response-assertions).
 
 ### 7. Hexagonal Architecture — IngestUseCase Port (Tech Debt)
 The `WebhookServer` currently calls `store.Deposit` directly, bypassing the domain layer. A `ports.MessageIngestor` interface and `services.Ingestor` use case should be introduced so all ingestion logic (validation, enrichment, routing) has a single place.

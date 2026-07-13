@@ -89,6 +89,11 @@ func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDef
 	triggerVars["run_id"] = runID
 
 	for i, triggerStep := range def.Triggers {
+		if triggerStep.DelayBefore > 0 {
+			log.Printf("[%s] step %d waiting %s before execution", runID, i+1, triggerStep.DelayBefore)
+			time.Sleep(triggerStep.DelayBefore)
+		}
+
 		reserved, err := o.reserveRecipients(ctx, triggerStep.Receivers, runID)
 		if err != nil {
 			o.failResult(result, err.Error())
@@ -106,6 +111,8 @@ func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDef
 		stepPassed := false
 
 		for attempt := 1; attempt <= stepMaxAttempts; attempt++ {
+			result.Attempts++
+
 			if attempt > 1 {
 				log.Printf("[%s] step %d retrying (attempt %d/%d)", runID, i+1, attempt, stepMaxAttempts)
 			}

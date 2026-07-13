@@ -8,12 +8,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
 	"e2e-framework/internal/pkg/template"
 )
+
+var reArrayIndex = regexp.MustCompile(`\[(\d+)\]`)
 
 type HTTPTrigger struct {
 	client *http.Client
@@ -89,13 +92,17 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-
-		return nil, fmt.Errorf("%w: returned status %d: %s", domain.ErrTriggerFailed, resp.StatusCode, string(respBody))
+	if def.ExpectedStatus != 0 {
+		if resp.StatusCode != def.ExpectedStatus {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("%w: expected status %d, got %d: %s", domain.ErrTriggerFailed, def.ExpectedStatus, resp.StatusCode, string(body))
+		}
+	} else if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("%w: returned status %d: %s", domain.ErrTriggerFailed, resp.StatusCode, string(body))
 	}
 
-	if len(def.Extract) == 0 {
+	if len(def.Extract) == 0 && len(def.ResponseAssertions) == 0 {
 		return map[string]string{}, nil
 	}
 
@@ -105,7 +112,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 	}
 
 	if len(bytes.TrimSpace(rawResp)) == 0 {
-		return nil, fmt.Errorf("%w: extraction was configured but the trigger response body is empty", domain.ErrTriggerFailed)
+		return nil, fmt.Errorf("%w: extract/response_assertions configured but trigger response body is empty", domain.ErrTriggerFailed)
 	}
 
 	var respPayload map[string]any
@@ -115,6 +122,10 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	flatResp := httputil.FlattenJSON(respPayload)
 
+	if err := runResponseAssertions(def.ResponseAssertions, flatResp, vars); err != nil {
+		return nil, err
+	}
+
 	extracted := make(map[string]string, len(def.Extract))
 	for varName, jsonPath := range def.Extract {
 		if val, ok := flatResp[strings.ToLower(jsonPath)]; ok {
@@ -123,4 +134,80 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 	}
 
 	return extracted, nil
+}
+
+func runResponseAssertions(assertions []domain.AssertionConfig, flatResp map[string]string, vars map[string]string) error {
+	for _, cfg := range assertions {
+		resolvedValue := template.ReplaceString(cfg.Value, vars)
+		field := strings.ToLower(cfg.Field)
+		actual, exists := flatResp[field]
+
+		var assertErr error
+		switch cfg.Type {
+		case "equals":
+			if actual != resolvedValue {
+				assertErr = fmt.Errorf("field %q: expected %q, got %q", cfg.Field, resolvedValue, actual)
+			}
+		case "contains":
+			if !strings.Contains(actual, resolvedValue) {
+				assertErr = fmt.Errorf("field %q: expected to contain %q, got %q", cfg.Field, resolvedValue, actual)
+			}
+		case "not_contains":
+			if strings.Contains(actual, resolvedValue) {
+				assertErr = fmt.Errorf("field %q: expected not to contain %q, got %q", cfg.Field, resolvedValue, actual)
+			}
+		case "present":
+			if !exists || actual == "" {
+				assertErr = fmt.Errorf("field %q: expected to be present, but was empty or missing", cfg.Field)
+			}
+		case "matches":
+			re, compErr := regexp.Compile(resolvedValue)
+			if compErr != nil {
+				assertErr = fmt.Errorf("field %q: invalid regex pattern %q: %v", cfg.Field, resolvedValue, compErr)
+			} else if !re.MatchString(actual) {
+				assertErr = fmt.Errorf("field %q: expected to match pattern %q, got %q", cfg.Field, resolvedValue, actual)
+			}
+		//TODO - Fix array_contains
+		case "array_contains":
+			normalized := reArrayIndex.ReplaceAllString(field, ".$1")
+			segments := strings.Split(normalized, "[]")
+			patternParts := make([]string, 0, len(segments)*2-1)
+			for i, seg := range segments {
+				if i > 0 {
+					patternParts = append(patternParts, `\.\d+`)
+				}
+				patternParts = append(patternParts, regexp.QuoteMeta(seg))
+			}
+			re, compErr := regexp.Compile("^" + strings.Join(patternParts, "") + "$")
+			if compErr != nil {
+				assertErr = fmt.Errorf("field %q: failed to compile pattern: %v", cfg.Field, compErr)
+				break
+			}
+			found := false
+			for k, v := range flatResp {
+				if re.MatchString(k) && v == resolvedValue {
+					found = true
+					break
+				}
+			}
+			if !found {
+				assertErr = fmt.Errorf("field %q: no array element with value %q found", cfg.Field, resolvedValue)
+			}
+		case "length":
+			lenKey := field + ".__len__"
+			actualLen, lenExists := flatResp[lenKey]
+			if !lenExists {
+				assertErr = fmt.Errorf("field %q: field is not an array or does not exist", cfg.Field)
+			} else if actualLen != resolvedValue {
+				assertErr = fmt.Errorf("field %q: expected length %s, got %s", cfg.Field, resolvedValue, actualLen)
+			}
+		default:
+			assertErr = fmt.Errorf("unknown response_assertions type %q", cfg.Type)
+		}
+
+		if assertErr != nil {
+			return fmt.Errorf("%w: response assertion failed: %v | response body: %v", domain.ErrTriggerFailed, assertErr, flatResp)
+		}
+	}
+	return nil
 }

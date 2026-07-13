@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 The format follows a chronological order, newest changes first.
 
 ---
+
+## [2026-07-13] Recursive test loader & triger improvements
+
+- **Recursive test loader**: `internal/pkg/config/loader.go` switched from `os.ReadDir` (flat) to `filepath.WalkDir` so subdirectories under `tests/` are scanned automatically.
+- **`expected_status` assertion**: New field `ExpectedStatus int` on `TriggerConfig` (`yaml:"expected_status"`). When non-zero, the trigger fails if the HTTP response code does not match exactly. When zero, the default behaviour (fail on 4xx/5xx) is preserved.
+- **`response_assertions` on triggers**: New field `ResponseAssertions []AssertionConfig` on `TriggerConfig`. Asserts fields in the trigger's own response JSON body before continuing to the next step. Sup
+ports types: `equals`, `contains`, `not_contains`, `present`, `matches`, `array_contains`, `length` (see below). Assertion error includes the full flattened response body for debugging.
+- **`array_contains` assertion type**: Field syntax `"items[].path"` — passes if any element in the array has the nested field equal to `value`. Supports dot-path nesting (e.g. `orders[].address.city`).
+- **`length` assertion type**: Asserts exact element count of an array field. `flattenMap` now stores `field.__len__` for every `[]any` it processes (`internal/pkg/httputil/payload.go`).
+- **Array index flattening**: `flattenMap` now recurses into `[]any` producing `field.0.key`, `field.1.key`, … — accessible via dot-notation in `extract` and all `response_assertions` types.
+- **`delay_before` per step**: New field `DelayBefore time.Duration` on `TriggerConfig` (`yaml:"delay_before"`). Sleeps once before the first attempt of that step (not before each retry).
+- **`attempts` in API response**: `result.Attempts` now incremented on each trigger attempt; `TestResult` and `ReceiverResult` fields use snake_case JSON tags.
+
+---
 ## [2026-07-11] — Unified Triggers (Multiple Steps)
 
 - **Unified syntax**: `TestDefinition.Triggers []TriggerConfig` (YAML key: `triggers`) is the only supported syntax. Each trigger groups an HTTP call with its own receivers and a `wait_for_receivers` flag.

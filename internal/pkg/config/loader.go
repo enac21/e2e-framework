@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -13,20 +14,17 @@ import (
 func LoadTestDefinitions(dir string) (map[string]domain.TestDefinition, error) {
 	tests := make(map[string]domain.TestDefinition)
 
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read test directory: %v", domain.ErrConfiguration, err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yaml" {
-			continue
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(d.Name()) != ".yaml" {
+			return nil
 		}
 
-		path := filepath.Join(dir, entry.Name())
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("%w: failed to read test file %s: %v", domain.ErrConfiguration, path, err)
+			return fmt.Errorf("%w: failed to read test file %s: %v", domain.ErrConfiguration, path, err)
 		}
 
 		// Resolve env vars
@@ -40,10 +38,15 @@ func LoadTestDefinitions(dir string) (map[string]domain.TestDefinition, error) {
 
 		var def domain.TestDefinition
 		if err := yaml.Unmarshal([]byte(resolved), &def); err != nil {
-			return nil, fmt.Errorf("%w: failed to parse test file %s: %v", domain.ErrConfiguration, path, err)
+			return fmt.Errorf("%w: failed to parse test file %s: %v", domain.ErrConfiguration, path, err)
 		}
 
 		tests[def.ID] = def
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to walk test directory: %v", domain.ErrConfiguration, err)
 	}
 
 	return tests, nil

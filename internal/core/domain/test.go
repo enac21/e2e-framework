@@ -8,14 +8,14 @@ import (
 )
 
 type TestDefinition struct {
-	Version   string           `yaml:"version"`
-	ID        string           `yaml:"id"`
-	Schedule  string           `yaml:"schedule"`
-	Enabled   bool             `yaml:"enabled"`
-	Async     bool             `yaml:"async"`
-	Retry     RetryConfig      `yaml:"retry"`
-	Triggers  []TriggerConfig  `yaml:"triggers"`
-	OnFailure OnFailureConfig  `yaml:"on_failure"`
+	Version   string          `yaml:"version"`
+	ID        string          `yaml:"id"`
+	Schedule  string          `yaml:"schedule"`
+	Enabled   bool            `yaml:"enabled"`
+	Async     bool            `yaml:"async"`
+	Retry     RetryConfig     `yaml:"retry"`
+	Triggers  []TriggerConfig `yaml:"triggers"`
+	OnFailure OnFailureConfig `yaml:"on_failure"`
 }
 
 type RetryConfig struct {
@@ -25,14 +25,17 @@ type RetryConfig struct {
 }
 
 type TriggerConfig struct {
-	Method           string            `yaml:"method"`
-	URL              string            `yaml:"url"`
-	Timeout          time.Duration     `yaml:"timeout"`
-	Headers          map[string]string `yaml:"headers"`
-	Body             map[string]any    `yaml:"body"`
-	Extract          map[string]string `yaml:"extract"`
-	Receivers        []ReceiverConfig  `yaml:"receivers"`
-	WaitForReceivers bool              `yaml:"wait_for_receivers"`
+	Method             string            `yaml:"method"`
+	URL                string            `yaml:"url"`
+	Timeout            time.Duration     `yaml:"timeout"`
+	DelayBefore        time.Duration     `yaml:"delay_before"`
+	Headers            map[string]string `yaml:"headers"`
+	Body               map[string]any    `yaml:"body"`
+	Extract            map[string]string `yaml:"extract"`
+	ExpectedStatus     int               `yaml:"expected_status"`
+	ResponseAssertions []AssertionConfig `yaml:"response_assertions"`
+	Receivers          []ReceiverConfig  `yaml:"receivers"`
+	WaitForReceivers   bool              `yaml:"wait_for_receivers"`
 }
 
 type ReceiverConfig struct {

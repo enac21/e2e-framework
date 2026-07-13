@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -73,7 +74,16 @@ func flattenMap(prefix string, m map[string]any) map[string]string {
 				result[nested] = nv
 			}
 		case []any:
-			result[key] = fmt.Sprintf("%v", val)
+			result[key+".__len__"] = fmt.Sprintf("%d", len(val))
+			for i, elem := range val {
+				indexKey := fmt.Sprintf("%s.%d", key, i)
+				switch ev := elem.(type) {
+				case map[string]any:
+					maps.Copy(result, flattenMap(indexKey, ev))
+				default:
+					result[indexKey] = fmt.Sprintf("%v", ev)
+				}
+			}
 		default:
 			result[key] = fmt.Sprintf("%v", val)
 		}
