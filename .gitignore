@@ -31,3 +31,6 @@ bin/
 .vscode/
 .idea/
 __debug* 
+
+# Other
+.DS_Store

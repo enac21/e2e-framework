@@ -11,12 +11,12 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/tidwall/gjson"
+
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
 	"e2e-framework/internal/pkg/template"
 )
-
-var reArrayIndex = regexp.MustCompile(`\[(\d+)\]`)
 
 type HTTPTrigger struct {
 	client *http.Client
@@ -122,7 +122,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	flatResp := httputil.FlattenJSON(respPayload)
 
-	if err := runResponseAssertions(def.ResponseAssertions, flatResp, vars); err != nil {
+	if err := runResponseAssertions(def.ResponseAssertions, flatResp, rawResp, vars); err != nil {
 		return nil, err
 	}
 
@@ -136,13 +136,15 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 	return extracted, nil
 }
 
-func runResponseAssertions(assertions []domain.AssertionConfig, flatResp map[string]string, vars map[string]string) error {
+func runResponseAssertions(assertions []domain.AssertionConfig, flatResp map[string]string, rawBody []byte, vars map[string]string) error {
 	for _, cfg := range assertions {
-		resolvedValue := template.ReplaceString(cfg.Value, vars)
-		field := strings.ToLower(cfg.Field)
-		actual, exists := flatResp[field]
+		var (
+			resolvedValue  = template.ReplaceString(cfg.Value, vars)
+			field          = strings.ToLower(cfg.Field)
+			actual, exists = flatResp[field]
+			assertErr      error
+		)
 
-		var assertErr error
 		switch cfg.Type {
 		case "equals":
 			if actual != resolvedValue {
@@ -167,31 +169,9 @@ func runResponseAssertions(assertions []domain.AssertionConfig, flatResp map[str
 			} else if !re.MatchString(actual) {
 				assertErr = fmt.Errorf("field %q: expected to match pattern %q, got %q", cfg.Field, resolvedValue, actual)
 			}
-		//TODO - Fix array_contains
-		case "array_contains":
-			normalized := reArrayIndex.ReplaceAllString(field, ".$1")
-			segments := strings.Split(normalized, "[]")
-			patternParts := make([]string, 0, len(segments)*2-1)
-			for i, seg := range segments {
-				if i > 0 {
-					patternParts = append(patternParts, `\.\d+`)
-				}
-				patternParts = append(patternParts, regexp.QuoteMeta(seg))
-			}
-			re, compErr := regexp.Compile("^" + strings.Join(patternParts, "") + "$")
-			if compErr != nil {
-				assertErr = fmt.Errorf("field %q: failed to compile pattern: %v", cfg.Field, compErr)
-				break
-			}
-			found := false
-			for k, v := range flatResp {
-				if re.MatchString(k) && v == resolvedValue {
-					found = true
-					break
-				}
-			}
-			if !found {
-				assertErr = fmt.Errorf("field %q: no array element with value %q found", cfg.Field, resolvedValue)
+		case "array_contains", "map_contains":
+			if !walkFind(gjson.Get(string(rawBody), cfg.Field), resolvedValue) {
+				assertErr = fmt.Errorf("field %q: no element with value %q found", cfg.Field, resolvedValue)
 			}
 		case "length":
 			lenKey := field + ".__len__"
@@ -206,8 +186,24 @@ func runResponseAssertions(assertions []domain.AssertionConfig, flatResp map[str
 		}
 
 		if assertErr != nil {
-			return fmt.Errorf("%w: response assertion failed: %v | response body: %v", domain.ErrTriggerFailed, assertErr, flatResp)
+			return fmt.Errorf("%w: response assertion failed: %v | response body: %s", domain.ErrTriggerFailed, assertErr, rawBody)
 		}
 	}
+
 	return nil
+}
+
+func walkFind(r gjson.Result, target string) bool {
+	if r.IsArray() {
+		found := false
+		r.ForEach(func(_, v gjson.Result) bool {
+			if walkFind(v, target) {
+				found = true
+				return false
+			}
+			return true
+		})
+		return found
+	}
+	return r.String() == target
 }

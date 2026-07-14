@@ -444,8 +444,21 @@ Use `response_assertions` inside a trigger to validate fields in the HTTP respon
 | `not_contains` | dot-path | value does not contain `value` |
 | `present` | dot-path | field exists and is non-empty |
 | `matches` | dot-path | value matches the `value` regex pattern |
-| `array_contains` | `array[].nested.path` | any element in the array has the nested field equal to `value` |
+| `array_contains` | gjson path (e.g. `items.#.name`) | any element resolved by the path equals `value`; supports nested arrays |
+| `map_contains` | gjson path with `@values` (e.g. `labels.@values`) | any value in a dynamic-key object equals `value` |
 | `length` | dot-path to array | array has exactly `value` elements |
+
+**gjson path syntax for `array_contains` / `map_contains`:**
+
+| Pattern | Meaning |
+|---------|---------|
+| `items.#.name` | all `name` values from the `items` array |
+| `data.#.statuses.#.general_status` | `general_status` from every status in every data element (nested arrays) |
+| `labels.@values` | all values of an object with dynamic keys |
+| `labels.@values.#.tag` | `tag` field from each map value (when values are objects) |
+| `items.0.name` | specific index access (unchanged dot-notation) |
+
+Full gjson path reference: https://github.com/tidwall/gjson#path-syntax
 
 ```yaml
 triggers:
@@ -485,7 +498,7 @@ triggers:
         field: "status"
         value: "pending"
       - type: array_contains
-        field: "orders[].address.city"
+        field: "orders.#.address.city"
         value: "Madrid"
       - type: length
         field: "notifications"
@@ -663,26 +676,29 @@ Each trigger now supports two assertion mechanisms that run directly against the
 - **`expected_status`** — asserts the response status code matches exactly. Enables error-path testing where a 4xx/5xx is the correct outcome. See [Status Code Assertions](#status-code-assertions).
 - **`response_assertions`** — asserts fields in the JSON response body using the same assertion types as receivers (`equals`, `contains`, `not_contains`, `present`, `matches`). Field paths use dot-notation and are case-insensitive. Values support `{{variable}}` substitution. See [Response Assertions](#response-assertions).
 
-### 7. Hexagonal Architecture — IngestUseCase Port (Tech Debt)
+### ✅ 7. gjson-powered `array_contains` + `map_contains`
+`array_contains` rewritten using [gjson](https://github.com/tidwall/gjson) path syntax. Supports nested arrays (`data.#.statuses.#.general_status`), flat arrays (`tags`), and dynamic-key objects via `map_contains` (`labels.@values`). Assertion failures now show the raw JSON body instead of the internal flat map.
+
+### 8. Hexagonal Architecture — IngestUseCase Port (Tech Debt)
 The `WebhookServer` currently calls `store.Deposit` directly, bypassing the domain layer. A `ports.MessageIngestor` interface and `services.Ingestor` use case should be introduced so all ingestion logic (validation, enrichment, routing) has a single place.
 
-### 8. Dynamic Hot-Reload
+### 9. Dynamic Hot-Reload
 Test YAML files are loaded once at startup. Use `fsnotify` to reload `tests/*.yaml` on change (local mode) or expose a `POST /system/reload` endpoint for CI/CD and Git webhook integration.
 
-### 9. Result Persistence
+### 10. Result Persistence
 Replace the in-memory `map[string]*domain.TestResult` (max 100 entries, lost on restart) with a durable store. Proposed: Redis with a JSON blob per `run_id` plus a `ZSET` for chronological listing, and a configurable TTL.
 
-### 10. Improve API JSON Response Messages
+### 11. Improve API JSON Response Messages
 Standardise all error responses to return `Content-Type: application/json` with a consistent body:
 ```json
 { "code": 401, "message": "unauthorized" }
 ```
 Currently `http.Error` returns `text/plain`, which is inconsistent with the JSON success responses.
 
-### 11. Production-Ready Console Logging System
+### 12. Production-Ready Console Logging System
 Implement a reworked, structured logging system (e.g., using `log/slog`) that outputs strictly to standard console (stdout/stderr). This ensures logs are properly captured, parseable, and fully functional when the project is deployed in production environments like containers, Kubernetes, or any other cloud-native orchestrator.
 
-### 12. Comprehensive Documentation & YAML Reference
+### 13. Comprehensive Documentation & YAML Reference
 Review and enhance the `README.md` documentation. The primary goal is to thoroughly document each feature and rule of the framework strictly from the perspective of the YAML configuration file, providing clear examples and use cases for end-users to understand how to leverage all capabilities.
 
 ---

@@ -5,6 +5,17 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-07-14] — `array_contains` rewrite with gjson + `map_contains`
+
+- **New dependency**: `github.com/tidwall/gjson` v1.19.0 for JSON path queries in response assertions.
+- **Breaking change**: `array_contains` field syntax changed from `items[].path` to native gjson path syntax (`items.#.path`). Supports flat arrays (`tags`), nested arrays (`data.#.statuses.#.general_status`), and any depth via recursive walk.
+- **New assertion type**: `map_contains` — passes if any value in a dynamic-key object equals `value`. Uses gjson `@values` modifier (e.g. `field: "labels.@values"`).
+- **Improved error messages**: assertion failure now shows the raw JSON response body instead of the internal flat map. Human-readable even for empty-array cases.
+- **New helper**: unexported `walkFind(gjson.Result, target)` recursively traverses nested array results so `data.#.statuses.#.general_status` transparently finds leaf values without requiring `|@flatten`.
+- **New tests**: `internal/adapters/secondary/trigger/http_test.go` — 35 tests covering all assertion types, nested arrays, map wildcards, error message regression, and variable substitution.
+
+---
+
 ## [2026-07-13] Recursive test loader & triger improvements
 
 - **Recursive test loader**: `internal/pkg/config/loader.go` switched from `os.ReadDir` (flat) to `filepath.WalkDir` so subdirectories under `tests/` are scanned automatically.
