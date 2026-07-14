@@ -110,6 +110,8 @@ func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDef
 
 		stepPassed := false
 
+		var lastTriggerErr error
+
 		for attempt := 1; attempt <= stepMaxAttempts; attempt++ {
 			result.Attempts++
 
@@ -119,7 +121,8 @@ func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDef
 
 			stepVars, triggerErr := o.trigger.Execute(ctx, triggerStep, runID, triggerVars)
 			if triggerErr != nil {
-				o.failResult(result, fmt.Sprintf("step %d trigger failed: %v", i+1, triggerErr))
+				lastTriggerErr = triggerErr
+				log.Printf("[%s] step %d attempt %d/%d failed: %v", runID, i+1, attempt, stepMaxAttempts, triggerErr)
 
 				if attempt < stepMaxAttempts {
 					time.Sleep(def.Retry.Delay)
@@ -163,7 +166,11 @@ func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDef
 			}
 		}
 
-		if !stepPassed && result.Status != domain.StatusPassed {
+		if !stepPassed {
+			if lastTriggerErr != nil {
+				o.failResult(result, fmt.Sprintf("step %d trigger failed: %v", i+1, lastTriggerErr))
+			}
+
 			return
 		}
 
