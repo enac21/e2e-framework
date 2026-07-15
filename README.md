@@ -608,7 +608,7 @@ webhook:
 
 store:
   redis:
-    url: "{{env.REDIS_URL}}"
+    url: "{{env.REDIS_URL}}" //TODO - Cluster mode & credentials
     ttl: 300s          # How long received messages are kept
 
 scheduler:
