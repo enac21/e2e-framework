@@ -105,6 +105,4 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	//WIP
-
-	return
 }

@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 The format follows a chronological order, newest changes first.
 
 ---
+
+## [2026-07-14] — `array_contains` rewrite with gjson + `map_contains`
+
+- **New dependency**: `github.com/tidwall/gjson` v1.19.0 for JSON path queries in response assertions.
+- **Breaking change**: `array_contains` field syntax changed from `items[].path` to native gjson path syntax (`items.#.path`). Supports flat arrays (`tags`), nested arrays (`data.#.statuses.#.general_status`), and any depth via recursive walk.
+- **New assertion type**: `map_contains` — passes if any value in a dynamic-key object equals `value`. Uses gjson `@values` modifier (e.g. `field: "labels.@values"`).
+- **Improved error messages**: assertion failure now shows the raw JSON response body instead of the internal flat map. Human-readable even for empty-array cases.
+- **New helper**: unexported `walkFind(gjson.Result, target)` recursively traverses nested array results so `data.#.statuses.#.general_status` transparently finds leaf values without requiring `|@flatten`.
+- **New tests**: `internal/adapters/secondary/trigger/http_test.go` — 35 tests covering all assertion types, nested arrays, map wildcards, error message regression, and variable substitution.
+
+---
+
+## [2026-07-13] Recursive test loader & triger improvements
+
+- **Recursive test loader**: `internal/pkg/config/loader.go` switched from `os.ReadDir` (flat) to `filepath.WalkDir` so subdirectories under `tests/` are scanned automatically.
+- **`expected_status` assertion**: New field `ExpectedStatus int` on `TriggerConfig` (`yaml:"expected_status"`). When non-zero, the trigger fails if the HTTP response code does not match exactly. When zero, the default behaviour (fail on 4xx/5xx) is preserved.
+- **`response_assertions` on triggers**: New field `ResponseAssertions []AssertionConfig` on `TriggerConfig`. Asserts fields in the trigger's own response JSON body before continuing to the next step. Sup
+ports types: `equals`, `contains`, `not_contains`, `present`, `matches`, `array_contains`, `length` (see below). Assertion error includes the full flattened response body for debugging.
+- **`array_contains` assertion type**: Field syntax `"items[].path"` — passes if any element in the array has the nested field equal to `value`. Supports dot-path nesting (e.g. `orders[].address.city`).
+- **`length` assertion type**: Asserts exact element count of an array field. `flattenMap` now stores `field.__len__` for every `[]any` it processes (`internal/pkg/httputil/payload.go`).
+- **Array index flattening**: `flattenMap` now recurses into `[]any` producing `field.0.key`, `field.1.key`, … — accessible via dot-notation in `extract` and all `response_assertions` types.
+- **`delay_before` per step**: New field `DelayBefore time.Duration` on `TriggerConfig` (`yaml:"delay_before"`). Sleeps once before the first attempt of that step (not before each retry).
+- **`attempts` in API response**: `result.Attempts` now incremented on each trigger attempt; `TestResult` and `ReceiverResult` fields use snake_case JSON tags.
+
+---
 ## [2026-07-11] — Unified Triggers (Multiple Steps)
 
 - **Unified syntax**: `TestDefinition.Triggers []TriggerConfig` (YAML key: `triggers`) is the only supported syntax. Each trigger groups an HTTP call with its own receivers and a `wait_for_receivers` flag.
