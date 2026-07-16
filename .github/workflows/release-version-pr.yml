@@ -1,0 +1,16 @@
+name: Release version PR
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release-version-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
