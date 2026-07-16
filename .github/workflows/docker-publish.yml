@@ -10,7 +10,36 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  auto-tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          latest=$(git tag --sort=-v:refname | grep '^v' | head -1)
+          if [ -z "$latest" ]; then
+            next="v0.1.0"
+          else
+            next=$(echo "$latest" | awk -F. '{print $1"."$2"."$3+1}')
+          fi
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag "$next"
+          git push origin "$next"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+
   build-and-push:
+    needs: auto-tag
+    if: always() && (needs.auto-tag.result == 'success' || github.ref != 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,7 +69,6 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-
