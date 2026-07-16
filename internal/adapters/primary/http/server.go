@@ -26,6 +26,7 @@ const (
 
 type Server struct {
 	cfg          *Config
+	mux          *http.ServeMux
 	httpServer   *http.Server
 	orchestrator *services.Orchestrator
 	tests        map[string]domain.TestDefinition
@@ -40,16 +41,21 @@ type Config struct {
 	JWTSecret  string
 }
 
+func (s *Server) Mux() *http.ServeMux {
+	return s.mux
+}
+
 func NewServer(cfg *Config, orchestrator *services.Orchestrator, tests map[string]domain.TestDefinition) *Server {
+	mux := http.NewServeMux()
+
 	s := &Server{
 		cfg:          cfg,
+		mux:          mux,
 		orchestrator: orchestrator,
 		tests:        tests,
 		results:      make(map[string]*domain.TestResult),
 		resultOrder:  make([]string, 0),
 	}
-
-	mux := http.NewServeMux()
 
 	log.Printf("[HTTP API] Registered endpoint: GET /health")
 	mux.HandleFunc("/health", s.handleHealth)

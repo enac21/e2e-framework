@@ -5,27 +5,27 @@
 version: "1"
 
 server:
-  port: 8082
+  port: 8080
   timeout: 30s
 
 auth:
   enabled: true
   jwt_secret: "{{env.JWT_SECRET}}"
 
-webhook:
-  port: 8081
-
 store:
   redis:
     url: "{{env.REDIS_URL}}"
     ttl: 300s
+    username: "{{env.REDIS_USERNAME}}"
+    password: "{{env.REDIS_PASSWORD}}"
+    cluster_mode: false
 
 scheduler:
   enabled: true
   timezone: "Europe/Madrid"
 
 tests:
-  path: "./tests"
+  path: "tests"
 
 receivers:
   sms:

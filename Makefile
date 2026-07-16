@@ -1,6 +1,6 @@
 # NOTE: mingw32-make in windows
 
-.PHONY: build run test test-integration lint clean docker-build docker-up docker-down
+.PHONY: build run test test-integration lint clean docker-build docker-build-multiarch docker-up docker-down
 
 # Binary output name
 BINARY_NAME=e2e-testing-service
@@ -29,9 +29,15 @@ lint:
 mocks:
 	go generate ./internal/core/ports/...
 
-# Build Docker image
+# Build Docker image for current platform
 docker-build:
 	docker build -t e2e-testing-service .
+
+# Build and push multi-arch image to GHCR (requires: docker buildx create --use)
+docker-build-multiarch:
+	docker buildx build --platform linux/amd64,linux/arm64 \
+		-t ghcr.io/enac21/e2e-framework:latest \
+		--push .
 
 # Start all services with Docker Compose
 docker-up:

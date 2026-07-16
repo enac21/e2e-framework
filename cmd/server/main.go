@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -33,22 +32,34 @@ import (
 func main() {
 	log.Println("Starting e2e-testing-service...")
 
-	cfg, err := config.LoadConfig("configs/config.yaml")
+	cfgPath := os.Getenv("CONFIG_PATH")
+	if cfgPath == "" {
+		cfgPath = "configs/config.yaml"
+	}
+
+	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	tests, err := config.LoadTestDefinitions("tests")
+	testsPath := cfg.Tests.Path
+	if testsPath == "" {
+		testsPath = "tests"
+	}
+
+	tests, err := config.LoadTestDefinitions(testsPath)
 	if err != nil {
 		log.Fatalf("failed to load tests: %v", err)
 	}
 
 	log.Printf("Loaded %d test definitions", len(tests))
 
-	// Setup secondary adapters
 	redisStore, err := store.NewRedisStore(store.RedisStoreConfig{
-		URL: cfg.Store.Redis.URL,
-		TTL: 24 * time.Hour,
+		URL:         cfg.Store.Redis.URL,
+		Username:    cfg.Store.Redis.Username,
+		Password:    cfg.Store.Redis.Password,
+		ClusterMode: cfg.Store.Redis.ClusterMode,
+		TTL:         cfg.Store.Redis.TTL,
 	})
 	if err != nil {
 		log.Fatalf("failed to connect to store: %v", err)
@@ -95,12 +106,10 @@ func main() {
 		JWTSecret:  cfg.Auth.JWTSecret,
 	}, orchestrator, tests)
 
-	whServer := webhook.NewServer(&webhook.Config{
-		Port: cfg.Webhook.Port,
-		//TODO - Add auth config
-	}, redisStore)
+	whServer := webhook.NewServer(redisStore)
 	whServer.RegisterExtractor("twilio", webhook.NewTwilioExtractor())
 	whServer.RegisterExtractor("meta", webhook.NewMetaExtractor())
+	whServer.RegisterRoutes(apiServer.Mux())
 
 	scheduler := cron.NewScheduler(orchestrator)
 	for _, t := range tests {
@@ -115,12 +124,9 @@ func main() {
 
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// Start servers
-	log.Printf("Starting API server on port %d", cfg.Server.Port)
+	// Start server (API + Webhook routes unified on single port)
+	log.Printf("Starting server on port %d", cfg.Server.Port)
 	g.Go(func() error { return apiServer.Start() })
-
-	log.Printf("Starting Webhook server on port %d", cfg.Webhook.Port)
-	g.Go(func() error { return whServer.Start() })
 
 	log.Println("Starting Cron scheduler")
 	scheduler.Start()
@@ -128,14 +134,8 @@ func main() {
 	// Shutdown handlers
 	g.Go(func() error {
 		<-gCtx.Done()
-		log.Println("Shutting down API server...")
+		log.Println("Shutting down server...")
 		return apiServer.Stop()
-	})
-
-	g.Go(func() error {
-		<-gCtx.Done()
-		log.Println("Shutting down Webhook server...")
-		return whServer.Stop()
 	})
 
 	g.Go(func() error {
