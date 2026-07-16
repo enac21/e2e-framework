@@ -3,43 +3,29 @@ name: Docker Publish
 on:
   push:
     branches: [main]
-    tags: ["v*"]
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  auto-tag:
-    if: github.ref == 'refs/heads/main'
+  release-please:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     outputs:
-      tag: ${{ steps.bump.outputs.tag }}
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: googleapis/release-please-action@v4
+        id: release
         with:
-          fetch-depth: 0
-
-      - name: Bump patch version
-        id: bump
-        run: |
-          latest=$(git tag --sort=-v:refname | grep '^v' | head -1)
-          if [ -z "$latest" ]; then
-            next="v0.1.0"
-          else
-            next=$(echo "$latest" | awk -F. '{print $1"."$2"."$3+1}')
-          fi
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git tag "$next"
-          git push origin "$next"
-          echo "tag=$next" >> "$GITHUB_OUTPUT"
+          release-type: go
 
   build-and-push:
-    needs: auto-tag
-    if: always() && (needs.auto-tag.result == 'success' || github.ref != 'refs/heads/main')
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -47,8 +33,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up QEMU (ARM64 emulation)
         uses: docker/setup-qemu-action@v3
@@ -69,8 +53,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ needs.release-please.outputs.tag_name }}
+            type=raw,value=latest
             type=sha,prefix=sha-
 
       - name: Build and push multi-arch image
