@@ -1,4 +1,0 @@
-{
-  "release-type": "go",
-  "pull-request-title-pattern": "chore: new version ${version}"
-}
