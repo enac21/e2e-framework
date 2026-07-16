@@ -2,58 +2,31 @@ package webhook
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	"e2e-framework/internal/core/ports"
 )
 
 type Server struct {
-	cfg        *Config
-	httpServer *http.Server
 	store      ports.Store
 	extractors map[string]ports.Extractor
 }
 
-type Config struct {
-	Port int
-}
-
-func NewServer(cfg *Config, store ports.Store) *Server {
-	mux := http.NewServeMux()
-
-	s := &Server{
-		cfg:        cfg,
+func NewServer(store ports.Store) *Server {
+	return &Server{
 		store:      store,
 		extractors: make(map[string]ports.Extractor),
 	}
+}
 
+func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/webhook/", s.handleWebhook)
-
-	s.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Port),
-		Handler: mux,
-	}
-
-	return s
 }
 
 func (s *Server) RegisterExtractor(path string, ext ports.Extractor) {
 	log.Printf("[Webhook API] Registered endpoint: POST /webhook/%s", path)
 	s.extractors[path] = ext
-}
-
-func (s *Server) Start() error {
-	return s.httpServer.ListenAndServe()
-}
-
-func (s *Server) Stop() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	return s.httpServer.Shutdown(ctx)
 }
 
 // handleWebhook godoc
@@ -103,6 +76,6 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
+func (s *Server) errorHandler(_ http.ResponseWriter, _ *http.Request, _ error) {
 	//WIP
 }

@@ -2,11 +2,21 @@ services:
   e2e-service:
     build: .
     ports:
-      - "8082:8082"
+      - "8080:8080"
     environment:
+      - CONFIG_PATH=configs/config.yaml
       - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=info
-      - LOG_FORMAT=json
+      # Optional: Redis credentials
+      # - REDIS_USERNAME=myuser
+      # - REDIS_PASSWORD=mypassword
+      - JWT_SECRET=changeme
+      # Optional: base URL for outbound webhook notifications
+      # - WEBHOOK_BASE_URL=https://example.com/notify
+    #volumes:
+      # Mount external tests directory
+      # - ./tests:/app/tests:ro
+      # Mount external config file
+      # - ./configs/config.yaml:/etc/e2e/config.yaml:ro
     depends_on:
       redis:
         condition: service_healthy

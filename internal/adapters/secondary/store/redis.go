@@ -15,25 +15,50 @@ const e2eTestKey = "e2e-test:%s:%s"
 const reservationTTL = 1 * time.Hour
 
 type RedisStoreConfig struct {
-	URL string
-	TTL time.Duration
+	URL         string
+	TTL         time.Duration
+	Username    string
+	Password    string
+	ClusterMode bool
 }
 
 type RedisStore struct {
-	client *redis.Client
+	client redis.Cmdable
+	close  func() error
 	ttl    time.Duration
 }
 
 func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
+	if len(cfg.URL) == 0 {
+		return nil, fmt.Errorf("%w: redis mode requires at least one URL", domain.ErrConfiguration)
+	}
+
+	if cfg.ClusterMode {
+		c := redis.NewClusterClient(&redis.ClusterOptions{
+			Addrs:    []string{cfg.URL},
+			Username: cfg.Username,
+			Password: cfg.Password,
+		})
+
+		return &RedisStore{client: c, close: c.Close, ttl: cfg.TTL}, nil
+	}
+
 	opts, err := redis.ParseURL(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid redis URL: %v", domain.ErrConfiguration, err)
 	}
 
-	return &RedisStore{
-		client: redis.NewClient(opts),
-		ttl:    cfg.TTL,
-	}, nil
+	if cfg.Username != "" {
+		opts.Username = cfg.Username
+	}
+
+	if cfg.Password != "" {
+		opts.Password = cfg.Password
+	}
+
+	c := redis.NewClient(opts)
+
+	return &RedisStore{client: c, close: c.Close, ttl: cfg.TTL}, nil
 }
 
 func (s *RedisStore) Deposit(ctx context.Context, msg *domain.Message) error {
@@ -95,5 +120,5 @@ func (s *RedisStore) Delete(ctx context.Context, runID string, receiverType stri
 }
 
 func (s *RedisStore) Close() error {
-	return s.client.Close()
+	return s.close()
 }

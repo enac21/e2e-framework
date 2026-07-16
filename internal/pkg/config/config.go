@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -20,12 +21,16 @@ type Config struct {
 	} `yaml:"auth"`
 	Store struct {
 		Redis struct {
-			URL string `yaml:"url"`
+			URL         string        `yaml:"url"`
+			TTL         time.Duration `yaml:"ttl"`
+			Username    string        `yaml:"username"`
+			Password    string        `yaml:"password"`
+			ClusterMode bool          `yaml:"cluster_mode"`
 		} `yaml:"redis"`
 	} `yaml:"store"`
-	Webhook struct {
-		Port int `yaml:"port"`
-	} `yaml:"webhook"`
+	Tests struct {
+		Path string `yaml:"path"`
+	} `yaml:"tests"`
 }
 
 var envRegex = regexp.MustCompile(`\{\{env\.([^}]+)\}\}`)
