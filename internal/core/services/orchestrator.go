@@ -43,6 +43,35 @@ func NewOrchestrator(
 	}
 }
 
+type SequenceConfig struct {
+	Delay        time.Duration
+	SkipFailTest bool
+}
+
+func (o *Orchestrator) RunSequence(
+	ctx context.Context,
+	defs []domain.TestDefinition,
+	cfg SequenceConfig,
+) []*domain.TestResult {
+	results := make([]*domain.TestResult, 0, len(defs))
+
+	for i, def := range defs {
+		if i > 0 && cfg.Delay > 0 {
+			time.Sleep(cfg.Delay)
+		}
+
+		_, resultCh := o.RunTest(ctx, def)
+		result := <-resultCh
+		results = append(results, result)
+
+		if cfg.SkipFailTest && (result.Status == domain.StatusFailed || result.Status == domain.StatusError) {
+			break
+		}
+	}
+
+	return results
+}
+
 func (o *Orchestrator) RunTest(ctx context.Context, def domain.TestDefinition) (string, <-chan *domain.TestResult) {
 	runID := fmt.Sprintf("%s-%d", def.ID, time.Now().UnixNano())
 	resultCh := make(chan *domain.TestResult, 1)

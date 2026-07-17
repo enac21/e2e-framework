@@ -1,4 +1,4 @@
-package http
+package api
 
 import (
 	"context"
@@ -62,6 +62,9 @@ func NewServer(cfg *Config, orchestrator *services.Orchestrator, tests map[strin
 
 	log.Printf("[HTTP API] Registered endpoint: POST /run")
 	mux.HandleFunc("/run", s.authMiddleware(s.handleRun))
+
+	log.Printf("[HTTP API] Registered endpoint: POST /run-sequence")
+	mux.HandleFunc("/run-sequence", s.authMiddleware(s.handleRunSequence))
 
 	log.Printf("[HTTP API] Registered endpoint: GET /results")
 	mux.HandleFunc("/results", s.authMiddleware(s.handleResults))
@@ -245,6 +248,82 @@ func (s *Server) handleResults(w http.ResponseWriter, _ *http.Request) {
 // @Router /health [get]
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleRunSequence godoc
+// @Summary Run a sequence of tests
+// @Description Execute an ordered list of test IDs sequentially. Each test completes before the next starts.
+// @Tags Tests
+// @Accept json
+// @Produce json
+// @Param rules body []string true "Ordered list of test IDs to execute"
+// @Param test_delay query string false "Duration to wait between tests (e.g. '2s'). Not applied before the first test."
+// @Param skip_fail_test query bool false "Stop the sequence after the first failed or errored test (default false)"
+// @Success 200 {array} domain.TestResult
+// @Failure 400 {string} string "Invalid body or parameters"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 404 {string} string "Test ID not found"
+// @Failure 405 {string} string "Method not allowed"
+// @Router /run-sequence [post]
+func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	var rules []string
+	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+
+		return
+	}
+
+	if len(rules) == 0 {
+		http.Error(w, "rules must not be empty", http.StatusBadRequest)
+
+		return
+	}
+
+	var delay time.Duration
+
+	if raw := r.URL.Query().Get("test_delay"); raw != "" {
+		var err error
+
+		delay, err = time.ParseDuration(raw)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid test_delay: %v", err), http.StatusBadRequest)
+
+			return
+		}
+	}
+
+	skipFailTest := r.URL.Query().Get("skip_fail_test") == "true"
+
+	defs := make([]domain.TestDefinition, 0, len(rules))
+
+	for _, id := range rules {
+		def, ok := s.tests[id]
+		if !ok {
+			http.Error(w, fmt.Sprintf("test %q not found", id), http.StatusNotFound)
+
+			return
+		}
+
+		defs = append(defs, def)
+	}
+
+	ctx := context.WithoutCancel(r.Context())
+	results := s.orchestrator.RunSequence(ctx, defs, services.SequenceConfig{
+		Delay:        delay,
+		SkipFailTest: skipFailTest,
+	})
+
+	for _, res := range results {
+		s.storeResult(res)
+	}
+
+	respondJSON(w, http.StatusOK, results)
 }
 
 func respondJSON(w http.ResponseWriter, status int, payload any) {
