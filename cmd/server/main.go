@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"e2e-framework/internal/adapters/primary/api"
 	"e2e-framework/internal/adapters/primary/cron"
-	api "e2e-framework/internal/adapters/primary/http"
 	"e2e-framework/internal/adapters/primary/webhook"
 	"e2e-framework/internal/adapters/secondary/assertion"
 	"e2e-framework/internal/adapters/secondary/notifier"

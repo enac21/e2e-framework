@@ -5,6 +5,19 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-07-17] — POST /run-sequence: Sequential Test Execution
+
+- **New endpoint**: `POST /run-sequence` — accepts an ordered JSON array of test IDs as the request body and executes them sequentially, waiting for each to complete before starting the next.
+- **Query param `test_delay`**: Optional duration string (e.g. `"2s"`). Sleeps between tests — not before the first.
+- **Query param `skip_fail_test`**: Optional boolean (default `false`). When `true`, the sequence stops after the first failed or errored test, returning partial results.
+- **New type**: `services.SequenceConfig{Delay, SkipFailTest}` — groups all sequence-level config in one struct, avoiding scattered boolean parameters.
+- **New method**: `Orchestrator.RunSequence(ctx, defs, cfg SequenceConfig) []*domain.TestResult` — synchronous sequential runner; blocks on each test result before starting the next.
+- **New tests**: `internal/core/services/orchestrator_test.go` — 9 unit tests covering empty input, single test, disabled test, order preservation, delay timing, and SkipFailTest flag.
+- **New tests**: `internal/adapters/primary/http/server_test.go` — 11 unit tests covering method validation, JSON parsing, query parameter parsing, unknown IDs, result storage, and failure behavior.
+- **Swagger**: Added godoc annotations to `handleRunSequence` for OpenAPI documentation.
+
+---
+
 ## [2026-07-14] — `array_contains` rewrite with gjson + `map_contains`
 
 - **New dependency**: `github.com/tidwall/gjson` v1.19.0 for JSON path queries in response assertions.
