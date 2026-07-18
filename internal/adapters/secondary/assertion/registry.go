@@ -19,8 +19,10 @@ func NewAssertionRegistry() *AssertionRegistry {
 	}
 }
 
-func (r *AssertionRegistry) Register(typeName string, factory AssertionFactory) {
+func (r *AssertionRegistry) Register(typeName string, factory AssertionFactory) *AssertionRegistry {
 	r.factories[typeName] = factory
+
+	return r
 }
 
 func (r *AssertionRegistry) Create(cfg domain.AssertionConfig) (ports.Assertion, error) {

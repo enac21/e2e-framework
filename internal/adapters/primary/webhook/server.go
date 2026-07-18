@@ -20,13 +20,17 @@ func NewServer(store ports.Store) *Server {
 	}
 }
 
-func (s *Server) RegisterRoutes(mux *http.ServeMux) {
+func (s *Server) RegisterRoutes(mux *http.ServeMux) *Server {
 	mux.HandleFunc("/webhook/", s.handleWebhook)
+
+	return s
 }
 
-func (s *Server) RegisterExtractor(path string, ext ports.Extractor) {
+func (s *Server) RegisterExtractor(path string, ext ports.Extractor) *Server {
 	log.Printf("[Webhook API] Registered endpoint: POST /webhook/%s", path)
 	s.extractors[path] = ext
+
+	return s
 }
 
 // handleWebhook godoc

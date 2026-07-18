@@ -19,8 +19,10 @@ func NewReceiverRegistry() *ReceiverRegistry {
 	}
 }
 
-func (r *ReceiverRegistry) Register(typeName string, factory ReceiverFactory) {
+func (r *ReceiverRegistry) Register(typeName string, factory ReceiverFactory) *ReceiverRegistry {
 	r.factories[typeName] = factory
+
+	return r
 }
 
 func (r *ReceiverRegistry) Create(typeName string, options map[string]string) (ports.Receiver, error) {
