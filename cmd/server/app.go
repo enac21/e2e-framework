@@ -47,7 +47,6 @@ func Setup(cfg *config.Config, tests map[string]domain.TestDefinition) (*App, er
 		Register("present", assertion.NewPresentAssertion).
 		Register("not_contains", assertion.NewNotContainsAssertion)
 
-	//TODO - Handle the creation of the receivers based on the config. If not configured, ignore it
 	receiverReg := receiver.NewReceiverRegistry().
 		Register(
 			domain.RequestReceiverType,

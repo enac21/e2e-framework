@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"strings"
@@ -17,6 +19,9 @@ import (
 
 	httpSwagger "github.com/swaggo/http-swagger"
 )
+
+//go:embed web/*
+var webFiles embed.FS
 
 const (
 	maxStoredResults = 100
@@ -39,6 +44,27 @@ type Config struct {
 	Port       int
 	AuthEnable bool
 	JWTSecret  string
+}
+
+type TestSummary struct {
+	ID            string       `json:"id"`
+	Description   string       `json:"description"`
+	Enabled       bool         `json:"enabled"`
+	Async         bool         `json:"async"`
+	Schedule      string       `json:"schedule"`
+	Retry         RetryInfo    `json:"retry"`
+	Triggers      []TriggerInfo `json:"triggers"`
+}
+
+type RetryInfo struct {
+	Enabled  bool   `json:"enabled"`
+	Attempts int    `json:"attempts"`
+	Delay    string `json:"delay"`
+}
+
+type TriggerInfo struct {
+	Method string `json:"method"`
+	URL    string `json:"url"`
 }
 
 func (s *Server) Mux() *http.ServeMux {
@@ -74,6 +100,15 @@ func NewServer(cfg *Config, orchestrator *services.Orchestrator, tests map[strin
 
 	log.Printf("[HTTP API] Registered endpoint: GET /swagger/*")
 	mux.Handle("/swagger/", s.authMiddleware(httpSwagger.WrapHandler.ServeHTTP))
+
+	log.Printf("[HTTP API] Registered endpoint: GET /tests")
+	mux.HandleFunc("/tests", s.authMiddleware(s.handleTests))
+
+	webSub, _ := fs.Sub(webFiles, "web")
+	mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(webSub))))
+	mux.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusMovedPermanently)
+	})
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
@@ -248,6 +283,42 @@ func (s *Server) handleResults(w http.ResponseWriter, _ *http.Request) {
 // @Router /health [get]
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleTests godoc
+// @Summary List available tests
+// @Description Get all loaded test definitions as a simplified list
+// @Tags Tests
+// @Produce json
+// @Success 200 {array} TestSummary
+// @Failure 401 {string} string "Unauthorized"
+// @Router /tests [get]
+func (s *Server) handleTests(w http.ResponseWriter, _ *http.Request) {
+	summaries := make([]TestSummary, 0, len(s.tests))
+	for _, def := range s.tests {
+		triggers := make([]TriggerInfo, 0, len(def.Triggers))
+		for _, tr := range def.Triggers {
+			triggers = append(triggers, TriggerInfo{
+				Method: tr.Method,
+				URL:    tr.URL,
+			})
+		}
+
+		summaries = append(summaries, TestSummary{
+			ID:          def.ID,
+			Description: def.Description,
+			Enabled:     def.Enabled,
+			Async:       def.Async,
+			Schedule:    def.Schedule,
+			Retry: RetryInfo{
+				Enabled:  def.Retry.Enabled,
+				Attempts: def.Retry.Attempts,
+				Delay:    def.Retry.Delay.String(),
+			},
+			Triggers: triggers,
+		})
+	}
+	respondJSON(w, http.StatusOK, summaries)
 }
 
 // handleRunSequence godoc
