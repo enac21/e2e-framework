@@ -181,11 +181,14 @@ func TestRunSequence_SkipFailTest_StopsAfterFirstFailure(t *testing.T) {
 	def1 := domain.TestDefinition{ID: "fail", Enabled: true, Triggers: []domain.TriggerConfig{failTrigger}}
 	def2 := domain.TestDefinition{ID: "skip", Enabled: true}
 
+	notified := make(chan struct{})
+
 	mockTrigger.EXPECT().
 		Execute(gomock.Any(), failTrigger, gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("trigger error"))
 	mockNotifier.EXPECT().
 		Notify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Do(func(context.Context, domain.OnFailureConfig, *domain.TestResult) { close(notified) }).
 		Return(nil)
 
 	results := orch.RunSequence(
@@ -201,6 +204,8 @@ func TestRunSequence_SkipFailTest_StopsAfterFirstFailure(t *testing.T) {
 	if results[0].Status != domain.StatusError {
 		t.Errorf("expected status %q, got %q", domain.StatusError, results[0].Status)
 	}
+
+	<-notified
 }
 
 func TestRunSequence_SkipFailTest_False_ContinuesAfterFailure(t *testing.T) {
@@ -213,11 +218,14 @@ func TestRunSequence_SkipFailTest_False_ContinuesAfterFailure(t *testing.T) {
 	def1 := domain.TestDefinition{ID: "fail", Enabled: true, Triggers: []domain.TriggerConfig{failTrigger}}
 	def2 := domain.TestDefinition{ID: "ok", Enabled: true}
 
+	notified := make(chan struct{})
+
 	mockTrigger.EXPECT().
 		Execute(gomock.Any(), failTrigger, gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("trigger error"))
 	mockNotifier.EXPECT().
 		Notify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Do(func(context.Context, domain.OnFailureConfig, *domain.TestResult) { close(notified) }).
 		Return(nil)
 
 	results := orch.RunSequence(
@@ -237,4 +245,51 @@ func TestRunSequence_SkipFailTest_False_ContinuesAfterFailure(t *testing.T) {
 	if results[1].Status != domain.StatusPassed {
 		t.Errorf("expected second result status %q, got %q", domain.StatusPassed, results[1].Status)
 	}
+
+	<-notified
+}
+
+func TestRunSequence_TriggerVarsPopulatedOnFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	orch, mockTrigger, _, mockNotifier := newTestOrchestrator(t, ctrl)
+
+	okTrigger := domain.TriggerConfig{Method: "GET", URL: "http://ok", Extract: map[string]string{"transaction_id": "id"}}
+	failTrigger := domain.TriggerConfig{Method: "GET", URL: "http://fail"}
+
+	def := domain.TestDefinition{
+		ID:      "t1",
+		Enabled: true,
+		Triggers: []domain.TriggerConfig{
+			okTrigger,
+			failTrigger,
+		},
+	}
+
+	notified := make(chan struct{})
+
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), okTrigger, gomock.Any(), gomock.Any()).
+		Return(map[string]string{"transaction_id": "txn-42"}, nil)
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), failTrigger, gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("trigger error"))
+	mockNotifier.EXPECT().
+		Notify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Do(func(context.Context, domain.OnFailureConfig, *domain.TestResult) { close(notified) }).
+		Return(nil)
+
+	results := orch.RunSequence(context.Background(), []domain.TestDefinition{def}, SequenceConfig{})
+	result := results[0]
+
+	if result.Status != domain.StatusError {
+		t.Fatalf("expected status %q, got %q", domain.StatusError, result.Status)
+	}
+
+	if got := result.TriggerVars["transaction_id"]; got != "txn-42" {
+		t.Errorf("expected extracted var preserved on failure, got %q", got)
+	}
+
+	<-notified
 }
