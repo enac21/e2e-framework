@@ -130,6 +130,17 @@ triggers:
 | `{{extracted_var}}` | prior trigger `extract:` key | only available after the step that defines it; also valid in `on_failure.calls` |
 | `{{error}}` | failure context | only valid in `on_failure.calls` |
 
+## Template Generators
+
+Generators produce a fresh value each time they are resolved, anywhere template resolution happens (URLs, headers, bodies, assertions, `on_failure.calls`):
+
+| generator | syntax | notes |
+|---|---|---|
+| `{{randomInt(N)}}` | `randomInt(6)` | random integer with at most `N` digits, range `[0, 10^N)` |
+| `{{uuid()}}` | `uuid()` | random UUID v4 string |
+
+Each occurrence is evaluated independently (two `{{uuid()}}` in one payload differ). Invalid arguments leave the placeholder untouched and the call is skipped by the on_failure skip logic.
+
 ---
 
 ## on_failure Block

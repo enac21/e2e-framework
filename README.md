@@ -369,6 +369,28 @@ You can dynamically inject values across your test definition using the `{{varia
 
 See `tests/example_welcome_email.yaml` for a complete example.
 
+### Template Generators
+
+Besides variables, the framework evaluates **generators** — `{{name(args)}}` tags that produce a fresh value every time they are resolved. They work anywhere template resolution happens: URLs, headers, request/response bodies, assertions and `on_failure.calls`.
+
+| Generator | Syntax | Description |
+|---|---|---|
+| `{{randomInt(N)}}` | `randomInt(6)` | Random integer with at most `N` digits, in the range `[0, 10^N)`. |
+| `{{uuid()}}` | `uuid()` | Random UUID (v4) string, e.g. `2f4c3a1e-...-...-...-...`. |
+
+Each occurrence is evaluated independently, so the same tag used twice in one payload yields two different values (useful for idempotency keys that must be unique per field):
+
+```yaml
+triggers:
+  - method: POST
+    url: "https://api.example.com/v1/user"
+    body:
+      request_id: "{{uuid()}}"        # unique per request
+      otp_code: "{{randomInt(6)}}"    # 6-digit code
+```
+
+A generator whose arguments are invalid (e.g. `{{randomInt(abc)}}` or `{{uuid(v4)}}`) leaves the placeholder untouched, and the tag is reported by `HasUnresolved` as an unresolved placeholder.
+
 ### Extract Variables
 
 The `extract` block inside a trigger lets you capture values from the HTTP response body and store them as variables for use in subsequent triggers. The syntax is a map where:
@@ -581,6 +603,8 @@ Each call supports the same core fields as a trigger: `method` (default `POST`),
 | `{{error}}` | failure context (trigger error or aggregated receiver errors) |
 | `{{extracted_var}}` | any variable extracted by a trigger step that completed before the failure |
 | `{{env.VAR_NAME}}` | OS environment variable (resolved at config load time) |
+
+**Template generators** (see [Template Generators](#template-generators)) also work here, e.g. `body: { alert_id: "{{uuid()}}" }`.
 
 **Behaviour:**
 

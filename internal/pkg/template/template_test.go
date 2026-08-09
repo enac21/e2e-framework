@@ -1,6 +1,7 @@
 package template
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -127,6 +128,90 @@ func TestHasUnresolved_RemainingPlaceholder(t *testing.T) {
 func TestHasUnresolved_EmptyString(t *testing.T) {
 	if HasUnresolved("") {
 		t.Error("empty string should not be reported as unresolved")
+	}
+}
+
+var uuidV4Regex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func TestReplaceString_UUID_ValidFormat(t *testing.T) {
+	for range 20 {
+		got := ReplaceString("{{uuid()}}", map[string]string{})
+		if !uuidV4Regex.MatchString(got) {
+			t.Errorf("expected a valid v4 UUID, got: %q", got)
+		}
+	}
+}
+
+func TestReplaceString_UUID_IndependentOccurrences(t *testing.T) {
+	s := "{{uuid()}} {{uuid()}}"
+	differentFound := false
+
+	for range 50 {
+		got := ReplaceString(s, map[string]string{})
+		parts := strings.Fields(got)
+		if len(parts) != 2 {
+			t.Fatalf("unexpected format: %q", got)
+		}
+
+		if parts[0] != parts[1] {
+			differentFound = true
+			break
+		}
+	}
+
+	if !differentFound {
+		t.Error("expected independent uuid occurrences to differ at least once in 50 runs")
+	}
+}
+
+func TestReplaceString_UUID_RejectsArgs(t *testing.T) {
+	tag := "{{uuid(v4)}}"
+	got := ReplaceString(tag, map[string]string{})
+	if got != tag {
+		t.Errorf("placeholder with args should stay untouched, got: %q", got)
+	}
+
+	if !HasUnresolved(got) {
+		t.Error("unresolved uuid placeholder should be reported by HasUnresolved")
+	}
+}
+
+func TestReplaceMap_UUID_InBody(t *testing.T) {
+	body := map[string]any{
+		"request_id": "{{uuid()}}",
+		"name":       "{{name}}",
+	}
+	vars := map[string]string{"name": "alice"}
+	result := ReplaceMap(body, vars)
+
+	name, _ := result["name"].(string)
+	if name != "alice" {
+		t.Errorf("name: expected alice, got %s", name)
+	}
+
+	requestID, _ := result["request_id"].(string)
+	if !uuidV4Regex.MatchString(requestID) {
+		t.Errorf("request_id not a valid v4 UUID: %q", requestID)
+	}
+}
+
+func TestReplaceString_Mixed_GeneratorsAndVars(t *testing.T) {
+	vars := map[string]string{"run_id": "xyz"}
+	got := ReplaceString("id={{run_id}} code={{randomInt(3)}} uuid={{uuid()}}", vars)
+
+	if !strings.HasPrefix(got, "id=xyz code=") {
+		t.Errorf("unexpected prefix: %s", got)
+	}
+
+	uuidPart := strings.TrimPrefix(got, "id=xyz code=")
+	fields := strings.Fields(uuidPart)
+	if len(fields) != 2 {
+		t.Fatalf("unexpected format: %q", got)
+	}
+
+	uuidValue := strings.TrimPrefix(fields[1], "uuid=")
+	if !uuidV4Regex.MatchString(uuidValue) {
+		t.Errorf("uuid part not a valid v4 UUID: %q", uuidValue)
 	}
 }
 

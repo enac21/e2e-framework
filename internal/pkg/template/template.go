@@ -1,18 +1,13 @@
 package template
 
 import (
-	"math/rand/v2"
 	"regexp"
-	"strconv"
 	"strings"
+
+	"e2e-framework/internal/pkg/template/generators"
 )
 
-type generatorFunc func(args string) (string, bool)
-
 var (
-	generators = map[string]generatorFunc{
-		"randomInt": generateRandomInt,
-	}
 	generatorRegex   = regexp.MustCompile(`\{\{(\w+)\(([^)]*)\)\}\}`)
 	placeholderRegex = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 )
@@ -24,32 +19,13 @@ func resolveGenerators(s string) string {
 			return match
 		}
 
-		fn, ok := generators[sub[1]]
-		if !ok {
-			return match
-		}
-
-		result, generated := fn(sub[2])
+		result, generated := generators.Resolve(sub[1], sub[2])
 		if !generated {
 			return match
 		}
 
 		return result
 	})
-}
-
-func generateRandomInt(args string) (string, bool) {
-	n, err := strconv.Atoi(strings.TrimSpace(args))
-	if err != nil || n <= 0 {
-		return "", false
-	}
-
-	max := 1
-	for range n {
-		max *= 10
-	}
-
-	return strconv.Itoa(rand.IntN(max)), true
 }
 
 func ReplaceString(s string, vars map[string]string) string {
