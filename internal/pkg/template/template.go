@@ -9,13 +9,13 @@ import (
 
 type generatorFunc func(args string) (string, bool)
 
-// generators maps function name to its generator implementation.
-// Add new entries here to support additional {{funcName(args)}} tags.
-var generators = map[string]generatorFunc{
-	"randomInt": generateRandomInt,
-}
-
-var generatorRegex = regexp.MustCompile(`\{\{(\w+)\(([^)]*)\)\}\}`)
+var (
+	generators = map[string]generatorFunc{
+		"randomInt": generateRandomInt,
+	}
+	generatorRegex   = regexp.MustCompile(`\{\{(\w+)\(([^)]*)\)\}\}`)
+	placeholderRegex = regexp.MustCompile(`\{\{[^{}]*\}\}`)
+)
 
 func resolveGenerators(s string) string {
 	return generatorRegex.ReplaceAllStringFunc(s, func(match string) string {
@@ -58,6 +58,10 @@ func ReplaceString(s string, vars map[string]string) string {
 	}
 
 	return resolveGenerators(s)
+}
+
+func HasUnresolved(s string) bool {
+	return placeholderRegex.MatchString(s)
 }
 
 func ReplaceHeaders(headers map[string]string, vars map[string]string) map[string]string {

@@ -71,12 +71,17 @@ type AssertionConfig struct {
 }
 
 type OnFailureConfig struct {
-	Webhook WebhookAction `yaml:"webhook"`
+	Calls []CallAction `yaml:"calls"`
 }
 
-type WebhookAction struct {
-	URL     string            `yaml:"url"`
-	Method  string            `yaml:"method"`
-	Headers map[string]string `yaml:"headers"`
-	Body    map[string]any    `yaml:"body"`
+// CallAction is a single outbound HTTP call executed when a test fails.
+// Its shape mirrors the core fields of a TriggerConfig.
+type CallAction struct {
+	Method         string            `yaml:"method"`
+	URL            string            `yaml:"url"`
+	Timeout        time.Duration     `yaml:"timeout"`
+	DelayBefore    time.Duration     `yaml:"delay_before"`
+	Headers        map[string]string `yaml:"headers"`
+	Body           map[string]any    `yaml:"body"`
+	ExpectedStatus int               `yaml:"expected_status"`
 }

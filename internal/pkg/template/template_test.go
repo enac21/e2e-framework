@@ -111,3 +111,65 @@ func TestReplaceMap_RandomInt_InBody(t *testing.T) {
 		t.Errorf("idempotency_key %d out of range", n)
 	}
 }
+
+func TestHasUnresolved_ResolvedString(t *testing.T) {
+	if HasUnresolved("run=abc123 name=alice") {
+		t.Error("fully resolved string should not be reported as unresolved")
+	}
+}
+
+func TestHasUnresolved_RemainingPlaceholder(t *testing.T) {
+	if !HasUnresolved("run={{run_id}} name={{missing}}") {
+		t.Error("string with a remaining placeholder should be reported as unresolved")
+	}
+}
+
+func TestHasUnresolved_EmptyString(t *testing.T) {
+	if HasUnresolved("") {
+		t.Error("empty string should not be reported as unresolved")
+	}
+}
+
+func benchmarkPayload(small bool) string {
+	if small {
+		return "test_id={{test_id}} run_id={{run_id}} error={{error}} transaction_id={{transaction_id}}"
+	}
+
+	parts := make([]string, 0, 100)
+	for i := range 100 {
+		parts = append(parts, "field_"+strconv.Itoa(i)+"={{run_id}}_{{transaction_id}}")
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func BenchmarkReplaceString(b *testing.B) {
+	vars := map[string]string{
+		"run_id":         "abc",
+		"test_id":        "t1",
+		"error":          "boom",
+		"transaction_id": "txn-1",
+	}
+
+	cases := []struct {
+		name      string
+		payload   string
+		withRegex bool
+	}{
+		{name: "small/without-has-unresolved", payload: benchmarkPayload(true), withRegex: false},
+		{name: "small/with-has-unresolved", payload: benchmarkPayload(true), withRegex: true},
+		{name: "large/without-has-unresolved", payload: benchmarkPayload(false), withRegex: false},
+		{name: "large/with-has-unresolved", payload: benchmarkPayload(false), withRegex: true},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			for b.Loop() {
+				resolved := ReplaceString(tc.payload, vars)
+				if tc.withRegex {
+					HasUnresolved(resolved)
+				}
+			}
+		})
+	}
+}

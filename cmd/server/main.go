@@ -67,7 +67,7 @@ func main() {
 	defer redisStore.Close()
 
 	httpTrigger := trigger.NewHTTPTrigger()
-	webhookNotifier := notifier.NewWebhookNotifier()
+	httpNotifier := notifier.NewHTTPNotifier()
 
 	assertionReg := assertion.NewAssertionRegistry()
 	assertionReg.Register("contains", assertion.NewContainsAssertion)
@@ -96,7 +96,7 @@ func main() {
 		redisStore,
 		receiverReg,
 		assertionReg,
-		webhookNotifier,
+		httpNotifier,
 	)
 
 	// Setup primary adapters

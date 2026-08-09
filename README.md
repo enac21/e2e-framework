@@ -30,7 +30,7 @@ adapters/primary   →   core/services   →   ports   ←   adapters/secondary
 | **Assertion** | Validates a field of a NormalizedMessage against an expected value |
 | **Store** | Redis-backed temporary buffer with TTL for received messages |
 | **Orchestrator** | Coordinates the full test lifecycle, only knows ports |
-| **Notifier** | Sends alerts to a configured webhook when a test fails |
+| **Notifier** | Executes the `on_failure.calls` alerts when a test fails |
 
 ---
 
@@ -343,11 +343,20 @@ triggers:
     wait_for_receivers: true
 
 on_failure:
-  webhook:
-    url: "https://hooks.slack.com/services/XXX"
-    method: POST
-    body:
-      text: "Test {{test_id}} failed: {{error}}"
+  calls:
+    - method: POST
+      url: "https://hooks.slack.com/services/XXX"
+      timeout: 10s
+      headers:
+        Content-Type: application/json
+      body:
+        text: "Test {{test_id}} failed: {{error}}"
+    - method: POST
+      url: "https://alerts.company.com/tickets"
+      body:
+        test_id: "{{test_id}}"
+        run_id: "{{run_id}}"
+        error: "{{error}}"
 ```
 
 > For tests that need multiple HTTP calls in order (e.g., create then verify), add more items to the `triggers` list. Each trigger can have its own receivers and a `wait_for_receivers` flag
@@ -513,9 +522,9 @@ Use `delay_before` on any trigger step to pause execution for a fixed duration b
 triggers:
   # Step 1: Create resource via async service
   - method: POST
-    url: "{{env.GCM_BASE_URL}}/v1/inbox/notifications"
+    url: "{{env.BASE_URL}}/v1/test/notifications"
     headers:
-      Authorization: "Bearer {{env.GCM_TOKEN}}"
+      Authorization: "Bearer {{env.BASE_TOKEN}}"
     body:
       user_id: "abc-123"
     extract:
@@ -523,11 +532,11 @@ triggers:
 
   # Step 2: Wait 3s for async processing, then verify
   - method: GET
-    url: "{{env.INBOX_BASE_URL}}/v1/abc-123/notifications/{{notification_id}}"
+    url: "{{env.BASE_URL_2}}/v1/abc-123/notifications/{{notification_id}}"
     delay_before: 3s
     expected_status: 200
     headers:
-      Authorization: "Bearer {{env.INBOX_TOKEN}}"
+      Authorization: "Bearer {{env.BASE_2_TOKEN}}"
 ```
 
 **Rules:**
@@ -535,6 +544,50 @@ triggers:
 - The delay runs **once per step** — before the first attempt. Retries do not repeat the delay (they use `retry.delay` instead).
 - Omitting `delay_before` (or setting it to `0`) skips the delay entirely.
 - The delay is logged: `[run-id] step N waiting Xs before execution`.
+
+### on_failure Block
+
+When a test ends in `failed` or `error` (after all retries are exhausted), the framework notifies the configured alerting endpoints. The `on_failure` block accepts a list of `calls` — outbound HTTP requests executed **sequentially**, one after another:
+
+```yaml
+on_failure:
+  calls:
+    - method: POST
+      url: "https://hooks.slack.com/services/XXX"
+      timeout: 10s
+      headers:
+        Content-Type: application/json
+      body:
+        text: "Test {{test_id}} failed: {{error}}"
+    - method: POST
+      url: "https://alerts.company.com/tickets"
+      delay_before: 2s
+      expected_status: 201
+      body:
+        test_id: "{{test_id}}"
+        run_id: "{{run_id}}"
+        error: "{{error}}"
+        transaction_id: "{{transaction_id}}"
+```
+
+Each call supports the same core fields as a trigger: `method` (default `POST`), `url`, `timeout` (default `15s`), `delay_before`, `headers`, `body` (serialized as JSON; `Content-Type` is set automatically) and `expected_status`.
+
+**Template variables available in `on_failure.calls`:**
+
+| Variable | Source |
+|---|---|
+| `{{run_id}}` | auto-generated per run |
+| `{{test_id}}` | test definition `id` field |
+| `{{error}}` | failure context (trigger error or aggregated receiver errors) |
+| `{{extracted_var}}` | any variable extracted by a trigger step that completed before the failure |
+| `{{env.VAR_NAME}}` | OS environment variable (resolved at config load time) |
+
+**Behaviour:**
+
+- Calls run **asynchronously** — the failure result is returned to the caller first and the notification never blocks or alters the result.
+- If a call references a variable that was never extracted, that **call is skipped and a warning is logged**; the remaining calls still run.
+- A call is logged as failed (non-fatal) if the endpoint returns an HTTP error or a status different from `expected_status`.
+- If no call is configured, nothing happens.
 
 ### Receiver Options
 
@@ -569,7 +622,7 @@ retry:
 - `attempts` — total number of executions (initial + retries). `attempts: 3` means the framework will try up to 3 times before giving up.
 - `delay` — how long to wait between attempts. Use standard Go duration strings (`5s`, `1m`, `500ms`).
 
-On each attempt the orchestrator re-creates the receivers, re-fires the trigger and re-collects. If any attempt passes completely, the test is marked as `passed` and no further attempts are made. The `on_failure` webhook (if configured) is only called **once**, after all attempts are exhausted.
+On each attempt the orchestrator re-creates the receivers, re-fires the trigger and re-collects. If any attempt passes completely, the test is marked as `passed` and no further attempts are made. The `on_failure.calls` notifications (if configured) are only executed **once**, after all attempts are exhausted.
 
 > **Note:** Configuration errors (e.g., an unknown receiver `type`) abort immediately and are never retried, since they will not resolve on their own.
 

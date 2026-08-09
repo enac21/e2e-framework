@@ -5,6 +5,22 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-08-08] — on_failure.calls: sequential failure notifications
+
+- **Breaking change**: `on_failure.webhook` renamed to `on_failure.calls` — a list of outbound HTTP requests executed **sequentially** when a test fails. The old single `webhook:` block is no longer parsed.
+- **New type**: `domain.CallAction` (`method`, `url`, `timeout`, `delay_before`, `headers`, `body`, `expected_status`) — mirrors the core fields of a `TriggerConfig`.
+- **Renamed adapter**: `notifier.WebhookNotifier` → `notifier.HTTPNotifier` (`internal/adapters/secondary/notifier/webhook.go` → `http.go`). Constructor `NewWebhookNotifier()` → `NewHTTPNotifier()`. The port interface and its generated mock are unchanged.
+- **Extracted variables in notifications**: `on_failure.calls` now resolves every variable extracted by trigger steps that completed before the failure (`{{extracted_var}}`), plus `{{run_id}}`, `{{test_id}}` and `{{error}}`. The orchestrator now populates `TestResult.TriggerVars` on failure paths too (previously only on success).
+- **Skip-on-missing-variable**: a call that references a variable that was never extracted is skipped and logged as a warning; the remaining calls still run. New helper `template.HasUnresolved` detects leftover placeholders.
+- **`{{error}}` populated on receiver failures**: `collectAndAssertAll` now aggregates failed/errored receiver results into `TestResult.Error` when no trigger error was recorded.
+- **Async & non-blocking**: failure notifications run in a detached goroutine (`context.Background()`), so the result is returned to the caller first and the notification never affects result display or timing. Unset call timeouts default to `15s`.
+- **`expected_status` per call**: optional exact status match; a mismatch or any 4xx/5xx is logged as a non-fatal failure.
+- **Removed**: `{{failed_receivers}}` — documented but never implemented; removed from docs and the example test.
+- **Docs**: `README.md` `on_failure` section and `.claude/skills/e2e-test-writer.md` updated to the new syntax.
+- **Tests**: `template_test.go` — `HasUnresolved` cases; new `notifier/http_test.go` — skip/failure/substitution/sequencing cases; `orchestrator_test.go` — `TriggerVars` populated on failure.
+
+---
+
 ## [2026-07-17] — POST /run-sequence: Sequential Test Execution
 
 - **New endpoint**: `POST /run-sequence` — accepts an ordered JSON array of test IDs as the request body and executes them sequentially, waiting for each to complete before starting the next.

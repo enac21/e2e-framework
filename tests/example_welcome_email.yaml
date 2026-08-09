@@ -47,13 +47,20 @@ triggers:
     wait_for_receivers: true
 
 on_failure:
-  webhook:
-    url: "https://alerts.company.com/hook"
-    method: POST
-    headers:
-      Content-Type: application/json
-    body:
-      test_id: "{{test_id}}"
-      run_id: "{{run_id}}"
-      error: "{{error}}"
-      failed_receivers: "{{failed_receivers}}"
+  calls:
+    - method: POST
+      url: "https://alerts.company.com/hook"
+      timeout: 10s
+      headers:
+        Content-Type: application/json
+      body:
+        test_id: "{{test_id}}"
+        run_id: "{{run_id}}"
+        error: "{{error}}"
+    - method: POST
+      url: "https://slack.com/api/chat.postMessage"
+      headers:
+        Authorization: "Bearer {{env.SLACK_TOKEN}}"
+      body:
+        channel: "#alerts"
+        text: "Test {{test_id}} failed on run {{run_id}}"

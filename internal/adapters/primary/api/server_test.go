@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -231,11 +232,14 @@ func TestHandleRunSequence_SkipFailTest_ReturnsPartialResults(t *testing.T) {
 	}
 	srv, mockTrigger, mockNotifier := newTestServer(t, ctrl, tests)
 
+	notified := make(chan struct{})
+
 	mockTrigger.EXPECT().
 		Execute(gomock.Any(), failTrigger, gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("trigger error"))
 	mockNotifier.EXPECT().
 		Notify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Do(func(context.Context, domain.OnFailureConfig, *domain.TestResult) { close(notified) }).
 		Return(nil)
 
 	w := postSequence(srv, "/run-sequence?skip_fail_test=true", []string{"fail", "ok"})
@@ -252,6 +256,8 @@ func TestHandleRunSequence_SkipFailTest_ReturnsPartialResults(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result (stopped after failure), got %d", len(results))
 	}
+
+	<-notified
 }
 
 func TestHandleRunSequence_SkipFailTest_False_ReturnsAllResults(t *testing.T) {
@@ -265,11 +271,14 @@ func TestHandleRunSequence_SkipFailTest_False_ReturnsAllResults(t *testing.T) {
 	}
 	srv, mockTrigger, mockNotifier := newTestServer(t, ctrl, tests)
 
+	notified := make(chan struct{})
+
 	mockTrigger.EXPECT().
 		Execute(gomock.Any(), failTrigger, gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("trigger error"))
 	mockNotifier.EXPECT().
 		Notify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Do(func(context.Context, domain.OnFailureConfig, *domain.TestResult) { close(notified) }).
 		Return(nil)
 
 	w := postSequence(srv, "/run-sequence?skip_fail_test=false", []string{"fail", "ok"})
@@ -286,4 +295,6 @@ func TestHandleRunSequence_SkipFailTest_False_ReturnsAllResults(t *testing.T) {
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results (continues after failure), got %d", len(results))
 	}
+
+	<-notified
 }

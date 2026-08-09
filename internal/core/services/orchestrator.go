@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,7 +108,7 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 	result.DurationMs = result.FinishedAt.Sub(startTime).Milliseconds()
 
 	if result.Status == domain.StatusFailed || result.Status == domain.StatusError {
-		o.notifyFailure(ctx, def.OnFailure, result)
+		go o.notifyFailure(context.Background(), def.OnFailure, result)
 	}
 
 	return result
@@ -125,6 +126,7 @@ func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDef
 
 		reserved, err := o.reserveRecipients(ctx, triggerStep.Receivers, runID)
 		if err != nil {
+			result.TriggerVars = triggerVars
 			o.failResult(result, err.Error())
 
 			return
@@ -194,6 +196,8 @@ func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDef
 				time.Sleep(def.Retry.Delay)
 			}
 		}
+
+		result.TriggerVars = triggerVars
 
 		if !stepPassed {
 			if lastTriggerErr != nil {
@@ -288,6 +292,21 @@ func (o *Orchestrator) collectAndAssertAll(ctx context.Context, runID string, ac
 	}
 
 	wg.Wait()
+
+	if result.Error == "" && result.Status != domain.StatusPassed {
+		result.Error = summarizeReceiverErrors(result.Receivers)
+	}
+}
+
+func summarizeReceiverErrors(receivers []domain.ReceiverResult) string {
+	var parts []string
+	for _, r := range receivers {
+		if r.Status == domain.StatusFailed || r.Status == domain.StatusError {
+			parts = append(parts, fmt.Sprintf("%s (trigger %d): %s", r.Type, r.TriggerIndex+1, r.Error))
+		}
+	}
+
+	return strings.Join(parts, "; ")
 }
 
 func (o *Orchestrator) collectAndAssert(
@@ -352,5 +371,7 @@ func (o *Orchestrator) failResult(result *domain.TestResult, errStr string) {
 }
 
 func (o *Orchestrator) notifyFailure(ctx context.Context, cfg domain.OnFailureConfig, result *domain.TestResult) {
-	_ = o.notifier.Notify(ctx, cfg, result)
+	if err := o.notifier.Notify(ctx, cfg, result); err != nil {
+		log.Printf("[%s] on_failure notification failed: %v", result.RunID, err)
+	}
 }
