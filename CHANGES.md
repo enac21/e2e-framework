@@ -5,6 +5,18 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-08-09] — `{{uuid()}}` generator & extensible template generator registry
+
+- **New generator**: `{{uuid()}}` — resolves to a random UUID v4 (via `github.com/google/uuid`). Works everywhere template resolution happens: URLs, headers, bodies, assertions and `on_failure.calls`.
+- **New dependency**: `github.com/google/uuid` v1.6.0.
+- **New subpackage**: `internal/pkg/template/generators` owns the whole generator concern — the `Generator` interface (`Name()`, `Generate(args)`), a package-level registry (`Register`, `Resolve`) and every built-in generator (`random_int.go`, `uuid.go`). `internal/pkg/template` keeps only the string-resolution API (`ReplaceString`, `ReplaceMap`, `ReplaceHeaders`, `HasUnresolved`) and delegates lookup to `generators.Resolve`.
+- **Self-registration**: each generator lives in its own file and registers itself via `init()`. Adding a new generator is now a single new file in `generators/` that implements `Generator` and calls `Register(...)` — no existing code changes (Open/Closed principle).
+- **`randomInt` preserved**: `generateRandomInt` moved unchanged into `RandomIntGenerator`; same semantics and tests.
+- **Docs**: `README.md` gains a "Template Generators" section and a note in `on_failure.calls`; `e2e-test-writer` skill documents both generators.
+- **Tests**: unit tests for the registry (unknown name, override, nil registration, rejected args) and each generator in `generators/`; integration tests via `ReplaceString`/`ReplaceMap` in the `template` package. All existing template tests pass unchanged.
+
+---
+
 ## [2026-08-08] — on_failure.calls: sequential failure notifications
 
 - **Breaking change**: `on_failure.webhook` renamed to `on_failure.calls` — a list of outbound HTTP requests executed **sequentially** when a test fails. The old single `webhook:` block is no longer parsed.
