@@ -15,6 +15,12 @@ import (
 	"e2e-framework/internal/pkg/template"
 )
 
+var reservedVarNames = map[string]bool{
+	"run_id":  true,
+	"test_id": true,
+	"error":   true,
+}
+
 type activeReceiver struct {
 	cfg      domain.ReceiverConfig
 	instance ports.Receiver
@@ -114,9 +120,24 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 	return result
 }
 
-func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDefinition, runID string, result *domain.TestResult) {
+func (o *Orchestrator) executeSequential(
+	ctx context.Context,
+	def domain.TestDefinition,
+	runID string,
+	result *domain.TestResult,
+) {
 	triggerVars := make(map[string]string)
 	triggerVars["run_id"] = runID
+
+	for k, v := range def.Variables {
+		if reservedVarNames[k] {
+			log.Printf("[%s] reserved variable name %q ignored in variables block", runID, k)
+
+			continue
+		}
+
+		triggerVars[k] = template.ReplaceString(v, triggerVars)
+	}
 
 	for i, triggerStep := range def.Triggers {
 		if triggerStep.DelayBefore > 0 {

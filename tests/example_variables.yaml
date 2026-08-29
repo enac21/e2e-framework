@@ -1,0 +1,37 @@
+# Example test: the top-level `variables:` block and YAML anchors.
+# `variables:` defines reusable one-shot values (evaluated once per run),
+# while anchors (`&anchor` / `<<: *anchor`) reuse whole YAML structures.
+version: "1"
+id: example_variables
+description: "Demonstrates the variables: block and YAML anchor reuse."
+
+enabled: false # Demo only: point BASE_URL at a JSON API before enabling
+
+# Reusable block: every POST in this test shares method/timeout/headers.
+x-post-json: &post_json
+  method: POST
+  timeout: 10s
+  headers:
+    Content-Type: application/json
+  wait_for_receivers: true
+
+variables:
+  base_url: "{{env.BASE_URL}}"
+  request_id: "{{uuid()}}"   # stable across all steps for idempotency/assertions
+
+triggers:
+  # Step 1: create a resource using the shared anchor + stable request_id.
+  - <<: *post_json
+    url: "{{base_url}}/items"
+    body:
+      request_id: "{{request_id}}"
+      name: "widget"
+
+  # Step 2: read it back; the same request_id is asserted everywhere.
+  - method: GET
+    url: "{{base_url}}/items/{{request_id}}"
+    timeout: 10s
+    response_assertions:
+      - type: contains
+        field: request_id
+        value: "{{request_id}}"   # still the single UUID captured in variables:

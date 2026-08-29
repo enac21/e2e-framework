@@ -295,9 +295,13 @@ schedule: "*/5 * * * *"
 enabled: true
 async: false
 
+variables:
+  base_url: "{{env.BASE_URL}}"
+  request_id: "{{uuid()}}"
+
 triggers:
   - method: POST
-    url: "https://api.example.com/endpoint"
+    url: "{{base_url}}/endpoint"
     timeout: 10s
     expected_status: 201
     headers:
@@ -367,7 +371,114 @@ You can dynamically inject values across your test definition using the `{{varia
 - `{{run_id}}`: Injected automatically by the Orchestrator. It's the unique UUID for the current test run.
 - **Trigger Extraction**: If your trigger hits an API that returns JSON, you can use the `extract` block to map JSON paths (using dot-notation, like `data.id`) to variable names (like `transaction_id`). You can then use these variables in your assertions (e.g., `value: "{{transaction_id}}"`) to validate dynamic runtime data.
 
+There are three sources of variables, in increasing precedence order (later sources override earlier ones on name collision):
+
+1. **Built-in**: `run_id` and `test_id` (see below).
+2. **`variables:` block**: static aliases and one-shot generators (see below).
+3. **`extract`**: variables captured from a trigger's JSON response. These overwrite a `{{name}}` from `variables:` if both share the same name.
+
+**Reserved names:** `run_id`, `test_id` and `error` cannot be defined in the `variables:` block. If you try, the value is ignored and a warning is logged.
+
 See `tests/example_welcome_email.yaml` for a complete example.
+
+### The `variables:` Block
+
+The optional `variables:` block lets you define reusable values at the top of a test. Each value is evaluated **once** when the run starts, then stays **stable for the whole test** — across every trigger, receiver, assertion and `on_failure` call. This is useful for:
+
+- **URLs and hosts that repeat** across many triggers (only need changing in one place).
+- **One-shot generators** like `{{uuid()}}` or `{{randomInt(N)}}` that must yield the *same* value everywhere (e.g. an idempotency key sent in the payload and later asserted). Unlike using the generator inline — which produces a *new* value on every occurrence — a variable captures a single value for the whole run.
+
+```yaml
+id: my_test
+variables:
+  base_url: "{{env.BASE_URL}}"
+  request_id: "{{uuid()}}"
+  otp_code: "{{randomInt(6)}}"
+
+triggers:
+  - method: POST
+    url: "{{base_url}}/v1/users"
+    body:
+      request_id: "{{request_id}}"     # same UUID everywhere
+      otp_code: "{{otp_code}}"         # same 6-digit code everywhere
+  - method: GET
+    url: "{{base_url}}/v1/users/{{request_id}}"
+    response_assertions:
+      - type: contains
+        field: request_id
+        value: "{{request_id}}"        # still the same UUID
+
+on_failure:
+  calls:
+    - url: "https://alerts.example.com"
+      body:
+        request_id: "{{request_id}}"   # available in notifications too
+```
+
+**Rules:**
+- `variables:` is a simple `name: value` map.
+- Values may use other variables (`{{env.X}}`, `{{run_id}}`, previously-defined `variables`, and generators).
+- Each variable is resolved once at start-up of the run; generators are not re-evaluated.
+- Reserved names (`run_id`, `test_id`, `error`) are ignored with a warning.
+- An `extract` value with the same name **overrides** the `variables:` value.
+
+### Reusing YAML Blocks (Anchors)
+
+The framework parses YAML with [`gopkg.in/yaml.v3`](https://github.com/go-yaml/yaml), which supports **YAML anchors and merge keys natively — no configuration needed**. You can define a reusable block (a full trigger, receiver, set of headers, etc.) once at the top of a test and apply it to many triggers. This is the "variable" equivalent for *whole YAML structures* rather than scalar values.
+
+There are **two ways** to reuse an anchor:
+
+#### 1. Alias (`*anchor`) — replace the whole block
+
+Use `*anchor` when the block is **already complete** and identical everywhere: it substitutes the entire anchored value as-is, with nothing added or overridden.
+
+```yaml
+id: my_test
+# A fully-specified shared block, defined with an anchor (&ping) under an x- key
+# (the x- prefix keeps it out of the framework's schema).
+x-ping: &ping
+  method: GET
+  url: "{{env.BASE_URL}}/health"
+  timeout: 5s
+  expected_status: 200
+
+triggers:
+  - *ping        # reuses the whole block exactly as defined
+  - *ping
+  - *ping
+```
+
+#### 2. Merge key (`<<: *anchor`) — reuse the block and add/override
+
+Use `<<: *anchor` when you want to start from the shared block **and** vary it per trigger: it merges the anchored keys as a base, and any key you write on that trigger **overrides** the anchored value.
+
+```yaml
+id: my_test
+x-post-json: &post_json
+  method: POST
+  timeout: 10s
+  headers:
+    Content-Type: application/json
+  wait_for_receivers: true
+
+variables:
+  base_url: "{{env.BASE_URL}}"
+
+triggers:
+  - <<: *post_json                      # reuse method/timeout/headers
+    url: "{{base_url}}/users"
+    body: { name: "Alice" }
+  - <<: *post_json                      # reuse again, override url/body only
+    url: "{{base_url}}/users/{{user_id}}"
+    body: { name: "Bob" }
+```
+
+**Rules:**
+- **Anchor within the same file only**: `&name` / `*name` / `<<: *name` reuse blocks *inside one YAML file*. Cross-file sharing is not supported.
+- Use the `x-` prefix (e.g. `x-post-json`) so the anchor block is not interpreted as a framework field.
+- `*anchor` is a **full replacement** — you cannot add or override fields on that node.
+- `<<: *anchor` **merges** the anchored keys into the current map; anything you write on that map overrides the anchored value.
+- Anchors and the `variables:` block are complementary: use `variables:` for values (URLs, IDs, tokens) and anchors for complete structures (headers, receivers, options).
 
 ### Template Generators
 
@@ -777,6 +888,9 @@ Implement a reworked, structured logging system (e.g., using `log/slog`) that ou
 
 ### 13. Comprehensive Documentation & YAML Reference
 Review and enhance the `README.md` documentation. The primary goal is to thoroughly document each feature and rule of the framework strictly from the perspective of the YAML configuration file, providing clear examples and use cases for end-users to understand how to leverage all capabilities.
+
+### ✅ 14. Test-Level `variables:` Block
+Tests can define reusable values in a top-level `variables:` map (static aliases and one-shot generators such as `{{uuid()}}` and `{{randomInt(N)}}`). Each value is resolved **once** at run start and stays stable for the whole test, including `on_failure` calls. Reserved names (`run_id`, `test_id`, `error`) are ignored with a warning, and an `extract` value overrides a `variables:` value on name collision. See [The `variables:` Block](#the-variables-block).
 
 ---
 

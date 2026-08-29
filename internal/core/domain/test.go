@@ -8,14 +8,15 @@ import (
 )
 
 type TestDefinition struct {
-	Version   string          `yaml:"version"`
-	ID        string          `yaml:"id"`
-	Schedule  string          `yaml:"schedule"`
-	Enabled   bool            `yaml:"enabled"`
-	Async     bool            `yaml:"async"`
-	Retry     RetryConfig     `yaml:"retry"`
-	Triggers  []TriggerConfig `yaml:"triggers"`
-	OnFailure OnFailureConfig `yaml:"on_failure"`
+	Version   string            `yaml:"version"`
+	ID        string            `yaml:"id"`
+	Schedule  string            `yaml:"schedule"`
+	Enabled   bool              `yaml:"enabled"`
+	Async     bool              `yaml:"async"`
+	Retry     RetryConfig       `yaml:"retry"`
+	Variables map[string]string `yaml:"variables"`
+	Triggers  []TriggerConfig   `yaml:"triggers"`
+	OnFailure OnFailureConfig   `yaml:"on_failure"`
 }
 
 type RetryConfig struct {

@@ -65,6 +65,10 @@ retry:
   attempts: 3
   delay: 15s
 
+variables:                  # optional: reusable one-shot values for the whole test
+  base_url: "{{env.BASE_URL}}"
+  request_id: "{{uuid()}}"
+
 triggers:
   - method: POST           # POST | GET | PUT | DELETE | PATCH
     url: "https://host/path/{{extracted_var}}"
@@ -127,8 +131,15 @@ triggers:
 | `{{run_id}}` | auto-generated per run | use for `source_id`, unique keys, traceability |
 | `{{test_id}}` | test definition `id` field | |
 | `{{env.VAR_NAME}}` | OS environment variable | credentials, tokens, hostnames |
+| `{{my_var}}` | test `variables:` block | static alias or one-shot generator; resolved once per run |
 | `{{extracted_var}}` | prior trigger `extract:` key | only available after the step that defines it; also valid in `on_failure.calls` |
 | `{{error}}` | failure context | only valid in `on_failure.calls` |
+
+**Variables block rules:**
+- `variables:` is a `name: value` map; values may reference `{{env.X}}`, `{{run_id}}`, previously-defined variables and generators.
+- Each variable is resolved **once** at run start — generators are not re-evaluated, so a captured `{{uuid()}}` stays stable everywhere.
+- **Reserved names** (`run_id`, `test_id`, `error`) are **ignored with a warning** if put in `variables:`.
+- An `extract` value with the same name **overrides** a `variables:` value.
 
 ## Template Generators
 
@@ -140,6 +151,62 @@ Generators produce a fresh value each time they are resolved, anywhere template 
 | `{{uuid()}}` | `uuid()` | random UUID v4 string |
 
 Each occurrence is evaluated independently (two `{{uuid()}}` in one payload differ). Invalid arguments leave the placeholder untouched and the call is skipped by the on_failure skip logic.
+
+> **Tip:** If you need the *same* value in several places (e.g. an idempotency key sent in the payload and later asserted), capture it once in the `variables:` block instead of repeating the generator inline:
+> ```yaml
+> variables:
+>   request_id: "{{uuid()}}"
+> ```
+
+---
+
+## YAML Anchors / Block Reuse
+
+The framework loads YAML with `yaml.v3`, which supports **anchors and merge keys natively**. If 2+ triggers (or receivers, headers, options) share the same structure, **use an anchor instead of duplicating** the block. Define the reusable block with `&name` under an `x-` key (so it is not parsed as a framework field). There are **two ways** to apply it:
+
+### 1. Alias (`*name`) — replace the whole block
+
+Use when the block is already **complete and identical** everywhere. It substitutes the entire anchored value; nothing can be added or overridden.
+
+```yaml
+x-ping: &ping
+  method: GET
+  url: "{{env.BASE_URL}}/health"
+  timeout: 5s
+  expected_status: 200
+
+triggers:
+  - *ping         # reuses the whole block exactly as defined
+  - *ping
+```
+
+### 2. Merge key (`<<: *name`) — reuse and add/override
+
+Use when you want to start from the shared block **and** vary it per trigger. Any key you write on the trigger overrides the anchored value.
+
+```yaml
+x-post-json: &post_json
+  method: POST
+  timeout: 10s
+  headers:
+    Content-Type: application/json
+  wait_for_receivers: true
+
+triggers:
+  - <<: *post_json
+    url: "{{env.BASE_URL}}/users"
+    body: { name: "Alice" }
+  - <<: *post_json
+    url: "{{env.BASE_URL}}/users/{{user_id}}"
+    body: { name: "Bob" }
+```
+
+**Rules:**
+- Anchors are **intra-file only** — they do not share across files.
+- Prefix the block key with `x-` to keep it out of the framework schema.
+- `*anchor` is a **full replacement** — you cannot add or override fields on that node.
+- `<<: *anchor` merges the anchored keys; anything written on the map overrides the anchored value.
+- Anchors reuse whole *structures*; use `variables:` for reusable *values* (URLs, IDs, tokens).
 
 ---
 
@@ -186,7 +253,10 @@ Before finalizing, verify:
 - [ ] `id` is unique — check existing files in `tests/` with `find tests/ -name "*.yaml" | xargs grep "^id:"`
 - [ ] Every trigger that modifies state has `expected_status`
 - [ ] Every trigger has `timeout`
-- [ ] Variable in `{{var}}` is defined in a PRIOR trigger's `extract:` (not the same trigger)
+- [ ] Variable in `{{var}}` is defined in `variables:`, a prior trigger's `extract:` (not the same trigger), or a built-in/`{{env}}`
+- [ ] No reserved names (`run_id`, `test_id`, `error`) used in `variables:`
+- [ ] Repeated `{{uuid()}}` / `{{randomInt(N)}}` that must stay consistent are captured once in `variables:` instead of inlined
+- [ ] If 2+ triggers/receivers share the same structure (headers, timeout, options, receivers), a YAML anchor (`&` / `<<:*`) is used instead of duplicating
 - [ ] `wait_for_receivers: true` is set whenever `receivers:` is present
 - [ ] Env vars are named consistently with existing tests (check `tests/` for conventions)
 - [ ] `source_id: "{{run_id}}"` used wherever the API supports idempotency keys
