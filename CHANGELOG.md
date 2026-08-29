@@ -1,6 +1,7 @@
 # Changelog
 
-## [0.2.0]() (2026-08-16)
+## [0.2.0](https://github.com/enac21/e2e-framework/compare/v0.1.1...v0.2.0) (2026-08-09)
+
 
 ### Features
 
