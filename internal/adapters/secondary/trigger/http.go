@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -42,7 +43,10 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	headers := template.ReplaceHeaders(def.Headers, vars)
 
-	var reqBody io.Reader
+	var (
+		reqBody  io.Reader
+		bodyText string
+	)
 	if def.Body != nil {
 		bodyMap := template.ReplaceMap(def.Body, vars)
 
@@ -60,14 +64,20 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 			for k, v := range bodyMap {
 				form.Set(k, fmt.Sprintf("%v", v))
 			}
-			reqBody = strings.NewReader(form.Encode())
+			bodyText = form.Encode()
+			reqBody = strings.NewReader(bodyText)
 		} else {
 			b, err := json.Marshal(bodyMap)
 			if err != nil {
 				return nil, fmt.Errorf("%w: failed to serialize trigger body: %v", domain.ErrTriggerFailed, err)
 			}
+			bodyText = string(b)
 			reqBody = bytes.NewReader(b)
 		}
+	}
+
+	if reason := unresolvedTriggerReason(targetURL, headers, bodyText); reason != "" {
+		return nil, fmt.Errorf("%w: %s", domain.ErrTriggerFailed, reason)
 	}
 
 	reqCtx := ctx
@@ -181,6 +191,16 @@ func runResponseAssertions(assertions []domain.AssertionConfig, flatResp map[str
 			} else if actualLen != resolvedValue {
 				assertErr = fmt.Errorf("field %q: expected length %s, got %s", cfg.Field, resolvedValue, actualLen)
 			}
+		case "int_eq", "int_gt", "int_gte", "int_lt", "int_lte":
+			actualNum, actualInt := parseInt(actual)
+			valueNum, valueInt := parseInt(resolvedValue)
+			if !actualInt {
+				assertErr = fmt.Errorf("field %q: %s requires an integer field value, got %q", cfg.Field, cfg.Type, actual)
+			} else if !valueInt {
+				assertErr = fmt.Errorf("field %q: %s requires an integer expected value, got %q", cfg.Field, cfg.Type, resolvedValue)
+			} else if passes, symbol := compareInts(cfg.Type, actualNum, valueNum); !passes {
+				assertErr = fmt.Errorf("field %q: %s failed: got %d, want %s %d", cfg.Field, cfg.Type, actualNum, symbol, valueNum)
+			}
 		default:
 			assertErr = fmt.Errorf("unknown response_assertions type %q", cfg.Type)
 		}
@@ -191,6 +211,50 @@ func runResponseAssertions(assertions []domain.AssertionConfig, flatResp map[str
 	}
 
 	return nil
+}
+
+func unresolvedTriggerReason(targetURL string, headers map[string]string, body string) string {
+	if template.HasUnresolved(targetURL) {
+		return fmt.Sprintf("trigger url %q contains an unresolved template placeholder", targetURL)
+	}
+
+	for k, v := range headers {
+		if template.HasUnresolved(v) {
+			return fmt.Sprintf("trigger header %q contains an unresolved template placeholder", k)
+		}
+	}
+
+	if template.HasUnresolved(body) {
+		return fmt.Sprintf("trigger body %q contains an unresolved template placeholder", body)
+	}
+
+	return ""
+}
+
+func parseInt(s string) (int64, bool) {
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	return n, true
+}
+
+func compareInts(typ string, a, b int64) (passes bool, symbol string) {
+	switch typ {
+	case "int_eq":
+		return a == b, "="
+	case "int_gt":
+		return a > b, ">"
+	case "int_gte":
+		return a >= b, ">="
+	case "int_lt":
+		return a < b, "<"
+	case "int_lte":
+		return a <= b, "<="
+	}
+
+	return false, typ
 }
 
 func walkFind(r gjson.Result, target string) bool {

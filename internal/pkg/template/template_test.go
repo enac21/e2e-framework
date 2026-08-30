@@ -215,6 +215,78 @@ func TestReplaceString_Mixed_GeneratorsAndVars(t *testing.T) {
 	}
 }
 
+func TestReplaceString_Increment_Sequential(t *testing.T) {
+	vars := map[string]string{"counter": "0"}
+	got := ReplaceString("{{++(counter)}} {{++(counter)}} {{++(counter)}}", vars)
+	if got != "1 2 3" {
+		t.Errorf("expected \"1 2 3\", got: %q", got)
+	}
+
+	if vars["counter"] != "3" {
+		t.Errorf("expected persisted counter 3, got %q", vars["counter"])
+	}
+}
+
+func TestReplaceString_Decrement(t *testing.T) {
+	vars := map[string]string{"counter": "3"}
+	got := ReplaceString("{{--(counter)}}", vars)
+	if got != "2" {
+		t.Errorf("expected \"2\", got: %q", got)
+	}
+
+	if vars["counter"] != "2" {
+		t.Errorf("expected persisted counter 2, got %q", vars["counter"])
+	}
+}
+
+func TestReplaceString_Increment_MissingVarDefaultsToZero(t *testing.T) {
+	vars := map[string]string{}
+	got := ReplaceString("{{++(missing)}} {{++(missing)}}", vars)
+	if got != "1 2" {
+		t.Errorf("expected \"1 2\", got: %q", got)
+	}
+
+	if vars["missing"] != "2" {
+		t.Errorf("expected persisted counter 2 in vars, got %q", vars["missing"])
+	}
+}
+
+func TestReplaceString_Decrement_MissingVarDefaultsToZero(t *testing.T) {
+	vars := map[string]string{}
+	got := ReplaceString("{{--(missing)}}", vars)
+	if got != "-1" {
+		t.Errorf("expected \"-1\", got: %q", got)
+	}
+
+	if vars["missing"] != "-1" {
+		t.Errorf("expected persisted counter -1 in vars, got %q", vars["missing"])
+	}
+}
+
+func TestReplaceString_Increment_NonIntVar(t *testing.T) {
+	vars := map[string]string{"counter": "abc"}
+	got := ReplaceString("{{++(counter)}}", vars)
+	if got != "{{++(counter)}}" {
+		t.Errorf("expected token untouched, got: %q", got)
+	}
+
+	if !HasUnresolved(got) {
+		t.Error("unresolved increment should be reported by HasUnresolved")
+	}
+
+	if vars["counter"] != "abc" {
+		t.Errorf("non-int var must not be mutated, got %q", vars["counter"])
+	}
+}
+
+func TestReplaceString_Increment_SeesUpdatedValueInSameString(t *testing.T) {
+	vars := map[string]string{"counter": "0"}
+	got := ReplaceString("{{++(counter)}} then {{counter}}", vars)
+	if got != "1 then 1" {
+		t.Errorf("expected \"1 then 1\", got: %q", got)
+	}
+}
+
 func benchmarkPayload(small bool) string {
 	if small {
 		return "test_id={{test_id}} run_id={{run_id}} error={{error}} transaction_id={{transaction_id}}"

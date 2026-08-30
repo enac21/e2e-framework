@@ -5,6 +5,24 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-08-30] — Int response assertions & variable increment/decrement operator
+
+- **New int response assertions**: `int_eq`, `int_gt`, `int_gte`, `int_lt`, `int_lte` added to trigger `response_assertions`. Numeric comparison (not string); both `field` value and `value` are parsed as 64-bit integers (whitespace-trimmed). If either side is not an integer, the assertion fails with a clear message. Existing string assertions (`equals`, `contains`, …) are untouched.
+- **New stateful operator `{{++(var)}}` / `{{--(var)}}`**: evaluated at the very start of `template.ReplaceString`. Replaces the token with the **already incremented/decremented** value and **persists** the mutation in `vars` (shared by reference through trigger steps, so counters advance across `extract`/`variables` values and later steps). Two evaluation moments: **before the request** (url/headers/body using vars from `variables:` or previous extracts) and **after the request** in later steps (on a var extracted by a prior trigger).
+- **Undeclared var**: an **undefined** variable is treated as `0` and created by the operator — `{{++(seq)}}` resolves to `1` (leaving `seq=1`), `{{--(seq)}}` resolves to `-1`. A variable that **exists but is not an integer** is left unresolved (`HasUnresolved` → `true`), no panic, no mutation. Consumers: trigger aborts with a clear `domain.ErrTriggerFailed`, `on_failure.calls` skips the call, assertions simply don't match.
+- **Unresolved guard in HTTP trigger**: `template.Execute` now checks `HasUnresolved` over the resolved url, each header and the serialized body **before** `client.Do`, aborting with `domain.ErrTriggerFailed` and the offending field instead of sending a literal `{{...}}` to the API.
+- **New tests**: `template_test.go` — sequential increments (1,2,3…), decrement, undefined var defaulting to `0` (created: `{{++}}` → 1,2 and `{{--}}` → -1), non-integer var left unresolved, persistence, and updated-value visibility in the same string; `trigger/http_test.go` — pass/fail per int operator, numeric-vs-string comparison, non-integer failures, variable substitution, trigger abort on unresolved increments (existing **non-integer** var) in url/body, and an undefined increment var being created and sent as `1`.
+- **Docs**: `README.md` — int assertion table + example in "Response Assertions" and a new "Increment/Decrement Operator" subsection; `e2e-test-writer` skill — int comparators, operator rules and Quality Checklist items.
+
+---
+
+## [2026-08-29] — Variables section & yaml anchor usage docs
+
+- **New variables section**: This section allows you to create a shared vars across all test steps.
+- **Yaml anchor docs**: Documentation about how to use anchors to avoid duplication contennt in test definition.
+
+---
+
 ## [2026-08-09] — `{{uuid()}}` generator & extensible template generator registry
 
 - **New generator**: `{{uuid()}}` — resolves to a random UUID v4 (via `github.com/google/uuid`). Works everywhere template resolution happens: URLs, headers, bodies, assertions and `on_failure.calls`.

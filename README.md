@@ -502,6 +502,39 @@ triggers:
 
 A generator whose arguments are invalid (e.g. `{{randomInt(abc)}}` or `{{uuid(v4)}}`) leaves the placeholder untouched, and the tag is reported by `HasUnresolved` as an unresolved placeholder.
 
+### Increment/Decrement Operator
+
+Unlike stateless generators, `{{++(var_name)}}` and `{{--(var_name)}}` are **stateful operators**: they mutate a test variable and persist that mutation. The variable is replaced by the with the new value and the change survives across trigger steps.
+
+Syntactically they are bracketed like generators: `{{++(counter)}}` and `{{--(counter)}}`.
+
+**Two evaluation moments:**
+
+1. **Before the request** — inside a trigger's `url`, `headers` or `body`: operates on variables that already exist (`variables:` block, or extracted by a *previous* trigger). Useful for building sequences of distinct request values.
+2. **After the request / in later steps** — once a previous trigger's `extract` has populated a variable, `{{++(var)}}` in a subsequent trigger (request, assertion value, `on_failure.calls`) advances it again.
+
+The operator is **not** used inside the `extract` block itself; it operates on already-extracted variables.
+
+```yaml
+variables:
+  counter: 0
+
+triggers:
+  - method: POST
+    url: "{{env.BASE_URL}}/items"
+    body:
+      seq: "{{++(counter)}}"        # sends 1, persists counter=1
+  - method: POST
+    url: "{{env.BASE_URL}}/items"
+    body:
+      seq: "{{++(counter)}}"        # sends 2, persists counter=2
+```
+
+**Rules:**
+- Replaces the variable with the new value and **persists** it: `{{++(counter)}}` with `counter=3` → `4` and `counter` stays `4`.
+- If the variable **does not exist**, it is treated as `0` and created by the operator: `{{++(seq)}}` on an undefined `seq` → `1` (leaving `seq=1`), `{{--(seq)}}` → `-1`.
+- If the variable **exists but is not an integer** (e.g. `"abc"`), the variable is left unresolved: the trigger aborts with a clear error, the `on_failure.calls` is skipped, and assertions simply don't match.
+
 ### Extract Variables
 
 The `extract` block inside a trigger lets you capture values from the HTTP response body and store them as variables for use in subsequent triggers. The syntax is a map where:
@@ -589,6 +622,25 @@ Use `response_assertions` inside a trigger to validate fields in the HTTP respon
 | `array_contains` | gjson path (e.g. `items.#.name`) | any element resolved by the path equals `value`; supports nested arrays |
 | `map_contains` | gjson path with `@values` (e.g. `labels.@values`) | any value in a dynamic-key object equals `value` |
 | `length` | dot-path to array | array has exactly `value` elements |
+| `int_eq` | dot-path | field value equals `value` numerically |
+| `int_gt` | dot-path | field value is greater than `value` |
+| `int_gte` | dot-path | field value is greater than or equal to `value` |
+| `int_lt` | dot-path | field value is less than `value` |
+| `int_lte` | dot-path | field value is less than or equal to `value` |
+
+**Numeric comparison:** the `int_*` assertions parse both sides as 64-bit integers (whitespace-trimmed) and compare numerically — `10` matches `int_gt` against `"9"`. If either side is not an integer, the assertion fails.
+
+```yaml
+response_assertions:
+  - type: present
+    field: "id"
+  - type: int_gt
+    field: "quantity"
+    value: "0"
+  - type: int_lte
+    field: "page"
+    value: "3"
+```
 
 **gjson path syntax for `array_contains` / `map_contains`:**
 

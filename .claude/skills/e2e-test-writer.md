@@ -115,6 +115,7 @@ triggers:
 | `not_contains` | substring must NOT be present |
 | `matches` | field matches regex pattern in `value` |
 | `present` | field exists (omit `value`) |
+| `int_eq` / `int_gt` / `int_gte` / `int_lt` / `int_lte` | numeric comparison of integer fields (counts, amounts, ids, lengths) — never `equals`-compare numeric fields that could be formatted differently |
 
 **Fields for response_assertions**: dot-notation JSON path from response body root (e.g., `"code"`, `"data.id"`, `"errors.0.message"`)
 
@@ -157,6 +158,34 @@ Each occurrence is evaluated independently (two `{{uuid()}}` in one payload diff
 > variables:
 >   request_id: "{{uuid()}}"
 > ```
+
+## Increment/Decrement Operator
+
+`{{++(var)}}` and `{{--(var)}}` are **stateful operators** (not generators): they mutate a test variable and persist that mutation across trigger steps. The token is replaced with the **already incremented/decremented** value (`++x` semantics).
+
+**Two evaluation moments:**
+- **Before the request** (a trigger's `url`/`headers`/`body`): operates on vars already present — from `variables:` or a *previous* trigger's `extract:`.
+- **After the request / later steps**: operates on a var extracted by an *earlier* trigger. Never put `++()`/`--()` inside an `extract:` block; operate on already-extracted vars instead.
+
+**Rules:**
+- Persists: `{{++(counter)}}` with `counter=3` sends `4` and leaves `counter=4`.
+- An undefined variable is treated as `0` and created by the operator: `{{++(seq)}}` sends `1` and leaves `seq=1`, `{{--(seq)}}` sends `-1` and leaves `seq=-1`.
+- If an *existing* variable isn't an integer, the token stays unresolved: the trigger aborts with a clear error, `on_failure.calls` skips that call, assertions don't match.
+- Confirm an existing var holds a plain integer (extracted digits) before using `++`/`--` on it.
+
+```yaml
+variables:
+  counter: "0"
+triggers:
+  - method: POST
+    url: "https://api.example.com/items"
+    body:
+      seq: "{{++(counter)}}"    # sends 1, persists counter=1
+  - method: POST
+    url: "https://api.example.com/items"
+    body:
+      seq: "{{++(counter)}}"    # sends 2, persists counter=2
+```
 
 ---
 
@@ -256,6 +285,8 @@ Before finalizing, verify:
 - [ ] Variable in `{{var}}` is defined in `variables:`, a prior trigger's `extract:` (not the same trigger), or a built-in/`{{env}}`
 - [ ] No reserved names (`run_id`, `test_id`, `error`) used in `variables:`
 - [ ] Repeated `{{uuid()}}` / `{{randomInt(N)}}` that must stay consistent are captured once in `variables:` instead of inlined
+- [ ] Numeric fields (counts, amounts, ids, lengths) use `int_*` assertions, not `equals`
+- [ ] `{{++(var)}}` / `{{--(var)}}` are used only on existing integer vars and never inside an `extract:` block
 - [ ] If 2+ triggers/receivers share the same structure (headers, timeout, options, receivers), a YAML anchor (`&` / `<<:*`) is used instead of duplicating
 - [ ] `wait_for_receivers: true` is set whenever `receivers:` is present
 - [ ] Env vars are named consistently with existing tests (check `tests/` for conventions)
