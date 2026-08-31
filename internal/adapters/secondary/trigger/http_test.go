@@ -9,8 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tidwall/gjson"
-
+	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
 )
@@ -23,89 +22,6 @@ func mustJSON(v any) []byte {
 	return b
 }
 
-func TestWalkFind(t *testing.T) {
-	tests := []struct {
-		name   string
-		json   string
-		path   string
-		target string
-		want   bool
-	}{
-		{
-			name:   "flat array hit",
-			json:   `{"items":["a","b","c"]}`,
-			path:   "items",
-			target: "b",
-			want:   true,
-		},
-		{
-			name:   "flat array miss",
-			json:   `{"items":["a","b","c"]}`,
-			path:   "items",
-			target: "d",
-			want:   false,
-		},
-		{
-			name:   "array of objects nested field",
-			json:   `{"items":[{"name":"Alice"},{"name":"Bob"}]}`,
-			path:   "items.#.name",
-			target: "Alice",
-			want:   true,
-		},
-		{
-			name:   "doubly nested arrays",
-			json:   `{"data":[{"statuses":[{"general_status":"requested"},{"general_status":"sending"}]}]}`,
-			path:   "data.#.statuses.#.general_status",
-			target: "requested",
-			want:   true,
-		},
-		{
-			name:   "doubly nested miss",
-			json:   `{"data":[{"statuses":[{"general_status":"requested"},{"general_status":"sending"}]}]}`,
-			path:   "data.#.statuses.#.general_status",
-			target: "delivered",
-			want:   false,
-		},
-		{
-			name:   "map values wildcard hit",
-			json:   `{"labels":{"env":"prod","tier":"web"}}`,
-			path:   "labels.@values",
-			target: "prod",
-			want:   true,
-		},
-		{
-			name:   "map values wildcard miss",
-			json:   `{"labels":{"env":"prod","tier":"web"}}`,
-			path:   "labels.@values",
-			target: "staging",
-			want:   false,
-		},
-		{
-			name:   "scalar result",
-			json:   `{"status":"active"}`,
-			path:   "status",
-			target: "active",
-			want:   true,
-		},
-		{
-			name:   "missing path",
-			json:   `{"status":"active"}`,
-			path:   "nonexistent",
-			target: "active",
-			want:   false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := walkFind(gjson.Get(tc.json, tc.path), tc.target)
-			if got != tc.want {
-				t.Errorf("walkFind(%q, %q) = %v, want %v", tc.path, tc.target, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestRunResponseAssertions(t *testing.T) {
 	type assertion struct {
 		typ   string
@@ -113,13 +29,14 @@ func TestRunResponseAssertions(t *testing.T) {
 		value string
 	}
 
+	reg := triggerasserts.NewDefaultTriggerAssertionRegistry()
 	run := func(t *testing.T, payload any, vars map[string]string, a assertion) error {
 		t.Helper()
 		raw := mustJSON(payload)
 		var m map[string]any
 		_ = json.Unmarshal(raw, &m)
 		flat := httputil.FlattenJSON(m)
-		return runResponseAssertions(
+		return reg.Run(
 			[]domain.AssertionConfig{{Type: a.typ, Field: a.field, Value: a.value}},
 			flat, raw, vars,
 		)
@@ -396,7 +313,7 @@ func TestExecute_AbortsOnUnresolvedIncrement(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := NewHTTPTrigger()
+	tr := NewHTTPTrigger(nil)
 	vars := map[string]string{"broken": "abc"}
 
 	t.Run("unresolved in url", func(t *testing.T) {
@@ -427,7 +344,7 @@ func TestExecute_IncrementCreatesMissingVar(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := NewHTTPTrigger()
+	tr := NewHTTPTrigger(nil)
 	vars := map[string]string{}
 	_, err := tr.Execute(context.Background(), domain.TriggerConfig{
 		URL: srv.URL + "/{{++(fresh)}}",

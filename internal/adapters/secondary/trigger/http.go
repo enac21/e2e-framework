@@ -8,24 +8,27 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
-	"strconv"
 	"strings"
 
-	"github.com/tidwall/gjson"
-
+	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
 	"e2e-framework/internal/pkg/template"
 )
 
 type HTTPTrigger struct {
-	client *http.Client
+	client     *http.Client
+	assertions *triggerasserts.TriggerAssertionRegistry
 }
 
-func NewHTTPTrigger() *HTTPTrigger {
+func NewHTTPTrigger(registry *triggerasserts.TriggerAssertionRegistry) *HTTPTrigger {
+	if registry == nil {
+		registry = triggerasserts.NewDefaultTriggerAssertionRegistry()
+	}
+
 	return &HTTPTrigger{
-		client: &http.Client{},
+		client:     &http.Client{},
+		assertions: registry,
 	}
 }
 
@@ -132,7 +135,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	flatResp := httputil.FlattenJSON(respPayload)
 
-	if err := runResponseAssertions(def.ResponseAssertions, flatResp, rawResp, vars); err != nil {
+	if err := t.assertions.Run(def.ResponseAssertions, flatResp, rawResp, vars); err != nil {
 		return nil, err
 	}
 
@@ -144,73 +147,6 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 	}
 
 	return extracted, nil
-}
-
-func runResponseAssertions(assertions []domain.AssertionConfig, flatResp map[string]string, rawBody []byte, vars map[string]string) error {
-	for _, cfg := range assertions {
-		var (
-			resolvedValue  = template.ReplaceString(cfg.Value, vars)
-			field          = strings.ToLower(cfg.Field)
-			actual, exists = flatResp[field]
-			assertErr      error
-		)
-
-		switch cfg.Type {
-		case "equals":
-			if actual != resolvedValue {
-				assertErr = fmt.Errorf("field %q: expected %q, got %q", cfg.Field, resolvedValue, actual)
-			}
-		case "contains":
-			if !strings.Contains(actual, resolvedValue) {
-				assertErr = fmt.Errorf("field %q: expected to contain %q, got %q", cfg.Field, resolvedValue, actual)
-			}
-		case "not_contains":
-			if strings.Contains(actual, resolvedValue) {
-				assertErr = fmt.Errorf("field %q: expected not to contain %q, got %q", cfg.Field, resolvedValue, actual)
-			}
-		case "present":
-			if !exists || actual == "" {
-				assertErr = fmt.Errorf("field %q: expected to be present, but was empty or missing", cfg.Field)
-			}
-		case "matches":
-			re, compErr := regexp.Compile(resolvedValue)
-			if compErr != nil {
-				assertErr = fmt.Errorf("field %q: invalid regex pattern %q: %v", cfg.Field, resolvedValue, compErr)
-			} else if !re.MatchString(actual) {
-				assertErr = fmt.Errorf("field %q: expected to match pattern %q, got %q", cfg.Field, resolvedValue, actual)
-			}
-		case "array_contains", "map_contains":
-			if !walkFind(gjson.Get(string(rawBody), cfg.Field), resolvedValue) {
-				assertErr = fmt.Errorf("field %q: no element with value %q found", cfg.Field, resolvedValue)
-			}
-		case "length":
-			lenKey := field + ".__len__"
-			actualLen, lenExists := flatResp[lenKey]
-			if !lenExists {
-				assertErr = fmt.Errorf("field %q: field is not an array or does not exist", cfg.Field)
-			} else if actualLen != resolvedValue {
-				assertErr = fmt.Errorf("field %q: expected length %s, got %s", cfg.Field, resolvedValue, actualLen)
-			}
-		case "int_eq", "int_gt", "int_gte", "int_lt", "int_lte":
-			actualNum, actualInt := parseInt(actual)
-			valueNum, valueInt := parseInt(resolvedValue)
-			if !actualInt {
-				assertErr = fmt.Errorf("field %q: %s requires an integer field value, got %q", cfg.Field, cfg.Type, actual)
-			} else if !valueInt {
-				assertErr = fmt.Errorf("field %q: %s requires an integer expected value, got %q", cfg.Field, cfg.Type, resolvedValue)
-			} else if passes, symbol := compareInts(cfg.Type, actualNum, valueNum); !passes {
-				assertErr = fmt.Errorf("field %q: %s failed: got %d, want %s %d", cfg.Field, cfg.Type, actualNum, symbol, valueNum)
-			}
-		default:
-			assertErr = fmt.Errorf("unknown response_assertions type %q", cfg.Type)
-		}
-
-		if assertErr != nil {
-			return fmt.Errorf("%w: response assertion failed: %v | response body: %s", domain.ErrTriggerFailed, assertErr, rawBody)
-		}
-	}
-
-	return nil
 }
 
 func unresolvedTriggerReason(targetURL string, headers map[string]string, body string) string {
@@ -229,45 +165,4 @@ func unresolvedTriggerReason(targetURL string, headers map[string]string, body s
 	}
 
 	return ""
-}
-
-func parseInt(s string) (int64, bool) {
-	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
-	if err != nil {
-		return 0, false
-	}
-
-	return n, true
-}
-
-func compareInts(typ string, a, b int64) (passes bool, symbol string) {
-	switch typ {
-	case "int_eq":
-		return a == b, "="
-	case "int_gt":
-		return a > b, ">"
-	case "int_gte":
-		return a >= b, ">="
-	case "int_lt":
-		return a < b, "<"
-	case "int_lte":
-		return a <= b, "<="
-	}
-
-	return false, typ
-}
-
-func walkFind(r gjson.Result, target string) bool {
-	if r.IsArray() {
-		found := false
-		r.ForEach(func(_, v gjson.Result) bool {
-			if walkFind(v, target) {
-				found = true
-				return false
-			}
-			return true
-		})
-		return found
-	}
-	return r.String() == target
 }

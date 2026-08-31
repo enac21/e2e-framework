@@ -12,9 +12,11 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"e2e-framework/internal/adapters/primary/api"
-	"e2e-framework/internal/adapters/secondary/assertion"
+	receiverasserts "e2e-framework/internal/adapters/secondary/assertions/receiver"
 	"e2e-framework/internal/adapters/secondary/receiver"
+	"e2e-framework/internal/adapters/secondary/trigger"
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/ports/mocks"
 	"e2e-framework/internal/core/services"
 )
@@ -30,11 +32,16 @@ func newTestServer(
 	mockStore := mocks.NewMockStore(ctrl)
 	mockNotifier := mocks.NewMockNotifier(ctrl)
 
+	triggerReg := trigger.NewTriggerRegistry()
+	triggerReg.Register(domain.HTTPTriggerType, func(options map[string]string) (ports.Trigger, error) {
+		return mockTrigger, nil
+	})
+
 	orch := services.NewOrchestrator(
-		mockTrigger,
+		triggerReg,
 		mockStore,
 		receiver.NewReceiverRegistry(),
-		assertion.NewAssertionRegistry(),
+		receiverasserts.NewReceiverAssertionRegistry(),
 		mockNotifier,
 	)
 

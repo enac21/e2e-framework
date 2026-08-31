@@ -29,6 +29,7 @@ Before writing YAML, collect (ask if not provided):
 2. **Test number** — next sequential number in that suite (check `tests/<suite>/` for existing files)
 3. **Test description** — one sentence, what behavior is verified
 4. **Trigger steps** — for each step:
+   - Trigger `type` (omit → `http`; other types are registered via the trigger registry) and trigger-level `options` (reserved/extensible)
    - HTTP method + URL
    - Expected HTTP status code (required unless truly any code is acceptable)
    - Request headers (Authorization, Content-Type, etc.)

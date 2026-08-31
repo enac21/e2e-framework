@@ -365,6 +365,8 @@ on_failure:
 
 > For tests that need multiple HTTP calls in order (e.g., create then verify), add more items to the `triggers` list. Each trigger can have its own receivers and a `wait_for_receivers` flag
 
+Each trigger may also declare a `type` (defaults to `http`) and an `options` map. `http` is the only trigger type bundled; its factory receives the shared `response_assertions` registry and currently ignores trigger-level `options` (they are passed to the factory and reserved for future trigger implementations). Triggers are built through a `TriggerRegistry` following the same factory pattern as receivers, so adding a new trigger type means registering a new factory in `main.go` and referencing it per-step (`type: my_type`).
+
 ### Dynamic Variables
 
 You can dynamically inject values across your test definition using the `{{variable_name}}` syntax:

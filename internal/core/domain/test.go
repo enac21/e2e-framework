@@ -26,6 +26,8 @@ type RetryConfig struct {
 }
 
 type TriggerConfig struct {
+	Type               string            `yaml:"type"`
+	Options            OptionsMap        `yaml:"options"`
 	Method             string            `yaml:"method"`
 	URL                string            `yaml:"url"`
 	Timeout            time.Duration     `yaml:"timeout"`
@@ -37,6 +39,16 @@ type TriggerConfig struct {
 	ResponseAssertions []AssertionConfig `yaml:"response_assertions"`
 	Receivers          []ReceiverConfig  `yaml:"receivers"`
 	WaitForReceivers   bool              `yaml:"wait_for_receivers"`
+}
+
+// EffectiveType returns the trigger type to use, defaulting to HTTP when
+// the step does not declare one.
+func (t TriggerConfig) EffectiveType() string {
+	if t.Type == "" {
+		return HTTPTriggerType
+	}
+
+	return t.Type
 }
 
 type ReceiverConfig struct {

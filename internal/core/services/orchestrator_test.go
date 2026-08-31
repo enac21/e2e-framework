@@ -3,14 +3,17 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"go.uber.org/mock/gomock"
 
-	"e2e-framework/internal/adapters/secondary/assertion"
+	receiverasserts "e2e-framework/internal/adapters/secondary/assertions/receiver"
 	"e2e-framework/internal/adapters/secondary/receiver"
+	"e2e-framework/internal/adapters/secondary/trigger"
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/ports/mocks"
 )
 
@@ -24,11 +27,16 @@ func newTestOrchestrator(
 	mockStore := mocks.NewMockStore(ctrl)
 	mockNotifier := mocks.NewMockNotifier(ctrl)
 
+	triggerReg := trigger.NewTriggerRegistry()
+	triggerReg.Register(domain.HTTPTriggerType, func(options map[string]string) (ports.Trigger, error) {
+		return mockTrigger, nil
+	})
+
 	orch := NewOrchestrator(
-		mockTrigger,
+		triggerReg,
 		mockStore,
 		receiver.NewReceiverRegistry(),
-		assertion.NewAssertionRegistry(),
+		receiverasserts.NewReceiverAssertionRegistry(),
 		mockNotifier,
 	)
 
@@ -444,4 +452,39 @@ func TestRunSequence_TriggerVarsPopulatedOnFailure(t *testing.T) {
 	}
 
 	<-notified
+}
+
+func TestRunSequence_UnknownTriggerTypeFailsStep(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	orch, mockTrigger, _, mockNotifier := newTestOrchestrator(t, ctrl)
+
+	def := domain.TestDefinition{
+		ID:      "t1",
+		Enabled: true,
+		Triggers: []domain.TriggerConfig{
+			{Type: "smtp"},
+		},
+	}
+
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(0)
+
+	mockNotifier.EXPECT().
+		Notify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil).
+		MinTimes(0)
+
+	results := orch.RunSequence(context.Background(), []domain.TestDefinition{def}, SequenceConfig{})
+	result := results[0]
+
+	if result.Status != domain.StatusError {
+		t.Fatalf("expected status %q, got %q", domain.StatusError, result.Status)
+	}
+
+	if !strings.Contains(result.Error, "unknown trigger type") {
+		t.Errorf("expected error to mention unknown trigger type, got %q", result.Error)
+	}
 }
