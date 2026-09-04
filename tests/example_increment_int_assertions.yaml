@@ -1,0 +1,98 @@
+# Example test: stateful increment/decrement operator + int response assertions.
+# 1) The first three triggers POST to a webhook.cool URL (an API call receiver);
+#    each one uses {{++(var)}} / {{--(var)}} and you can watch the received
+#    payloads in the webhook viewer. The counter persists across steps.
+# 2) The last two triggers hit the internal Productos API (localhost:8080) and
+#    exercise the int_eq/gt/gte/lt/lte response assertions over the numeric
+#    `id` field of the created product.
+version: "1"
+id: example_increment_int_assertions
+description: "Exercises the {{++}}/{{--}} increment operator against webhook.cool and the int_eq/gt/gte/lt/lte response assertions against the internal Productos API."
+
+enabled: true
+async: false
+
+variables:
+  webhook: "https://strong-mouse-78.webhook.cool"
+  api: "http://localhost:8080"
+  counter: 0
+
+triggers:
+  # --- Increment / decrement operator (visible in the webhook viewer) ---
+  # Step 1: header increments first (1), body increments again (2), and the
+  # {{counter}} placeholder sees the already-updated value (2).
+  - method: POST
+    url: "{{webhook}}/step1"
+    timeout: 30s
+    expected_status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      test: "1"
+      seq: "{{++(counter)}}"
+      echo: "{{counter}}"
+
+  # Step 2: decrement 2 -> 1 and read it back in the same payload.
+  - method: POST
+    url: "{{webhook}}/step2"
+    timeout: 30s
+    expected_status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      test: "2"
+      seq: "{{--(counter)}}"
+      after: "{{counter}}"
+
+  # Step 3: increment inside the URL path (1 -> 2) and again in the body (2 -> 3).
+  - method: POST
+    url: "{{webhook}}/final/{{++(counter)}}"
+    timeout: 30s
+    expected_status: 200
+    headers:
+      Content-Type: application/json
+    body:
+      test: "3"
+      seq: "{{++(counter)}}"
+
+  # --- Integer response assertions (internal Productos API) ---
+  # Step 4: create a product. The API returns the stored Producto (JSON), so the
+  # numeric `id` can be asserted and extracted for later steps. expected_status is
+  # omitted so both 200 and 201 create responses pass.
+  - method: POST
+    url: "{{api}}/productos"
+    timeout: 10s
+    headers:
+      Content-Type: application/json
+    body:
+      nombre: "Teclado mecanico"
+      descripcion: "Switches rojos, retroiluminado"
+      precio: 59.99
+    extract:
+      product_id: "id"
+    response_assertions:
+      - type: present
+        field: "id"
+      - type: int_gt
+        field: "id"
+        value: "0"
+      - type: int_gte
+        field: "id"
+        value: "1"
+
+  # Step 5: fetch the created product by id and assert its numeric id again,
+  # including variable substitution in the expected value ({{product_id}}).
+  - method: GET
+    url: "{{api}}/productos/{{product_id}}"
+    timeout: 10s
+    expected_status: 200
+    response_assertions:
+      - type: int_eq
+        field: "id"
+        value: "{{product_id}}"
+      - type: int_lt
+        field: "id"
+        value: "100000"
+      - type: int_lte
+        field: "id"
+        value: "100000"

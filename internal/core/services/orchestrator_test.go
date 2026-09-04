@@ -3,14 +3,17 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"go.uber.org/mock/gomock"
 
-	"e2e-framework/internal/adapters/secondary/assertion"
+	receiverasserts "e2e-framework/internal/adapters/secondary/assertions/receiver"
 	"e2e-framework/internal/adapters/secondary/receiver"
+	"e2e-framework/internal/adapters/secondary/trigger"
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/ports/mocks"
 )
 
@@ -24,11 +27,16 @@ func newTestOrchestrator(
 	mockStore := mocks.NewMockStore(ctrl)
 	mockNotifier := mocks.NewMockNotifier(ctrl)
 
+	triggerReg := trigger.NewTriggerRegistry()
+	triggerReg.Register(domain.HTTPTriggerType, func(options map[string]string) (ports.Trigger, error) {
+		return mockTrigger, nil
+	})
+
 	orch := NewOrchestrator(
-		mockTrigger,
+		triggerReg,
 		mockStore,
 		receiver.NewReceiverRegistry(),
-		assertion.NewAssertionRegistry(),
+		receiverasserts.NewReceiverAssertionRegistry(),
 		mockNotifier,
 	)
 
@@ -249,6 +257,158 @@ func TestRunSequence_SkipFailTest_False_ContinuesAfterFailure(t *testing.T) {
 	<-notified
 }
 
+func TestVariables_StaticAliasInjectedIntoTriggerVars(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	orch, mockTrigger, _, _ := newTestOrchestrator(t, ctrl)
+
+	trig := domain.TriggerConfig{Method: "GET", URL: "http://x"}
+	def := domain.TestDefinition{
+		ID:        "t1",
+		Enabled:   true,
+		Variables: map[string]string{"base_url": "http://svc.local", "env_name": "prod"},
+		Triggers:  []domain.TriggerConfig{trig},
+	}
+
+	var receivedVars map[string]string
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), trig, gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ domain.TriggerConfig, _ string, vars map[string]string) (map[string]string, error) {
+			receivedVars = vars
+
+			return map[string]string{}, nil
+		}).
+		Times(1)
+
+	results := orch.RunSequence(context.Background(), []domain.TestDefinition{def}, SequenceConfig{})
+	_ = results
+
+	if receivedVars["base_url"] != "http://svc.local" {
+		t.Errorf("expected base_url var injected, got %q", receivedVars["base_url"])
+	}
+
+	if receivedVars["env_name"] != "prod" {
+		t.Errorf("expected env_name var injected, got %q", receivedVars["env_name"])
+	}
+
+	if receivedVars["run_id"] == "" {
+		t.Error("expected run_id to remain present")
+	}
+}
+
+func TestVariables_GeneratorEvaluatedOnceAcrossTriggers(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	orch, mockTrigger, _, _ := newTestOrchestrator(t, ctrl)
+
+	trigA := domain.TriggerConfig{Method: "GET", URL: "http://a"}
+	trigB := domain.TriggerConfig{Method: "GET", URL: "http://b"}
+	def := domain.TestDefinition{
+		ID:        "t1",
+		Enabled:   true,
+		Variables: map[string]string{"request_id": "{{uuid()}}"},
+		Triggers:  []domain.TriggerConfig{trigA, trigB},
+	}
+
+	var firstRequestID, secondRequestID string
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), trigA, gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ domain.TriggerConfig, _ string, vars map[string]string) (map[string]string, error) {
+			firstRequestID = vars["request_id"]
+
+			return map[string]string{}, nil
+		}).
+		Times(1)
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), trigB, gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ domain.TriggerConfig, _ string, vars map[string]string) (map[string]string, error) {
+			secondRequestID = vars["request_id"]
+
+			return map[string]string{}, nil
+		}).
+		Times(1)
+
+	orch.RunSequence(context.Background(), []domain.TestDefinition{def}, SequenceConfig{})
+
+	if firstRequestID == "" || secondRequestID == "" {
+		t.Fatalf("expected request_id generator to resolve, got first=%q second=%q", firstRequestID, secondRequestID)
+	}
+
+	if firstRequestID != secondRequestID {
+		t.Errorf("expected request_id to be stable across triggers, got first=%q second=%q", firstRequestID, secondRequestID)
+	}
+}
+
+func TestVariables_ExtractOverridesVariableWithSameName(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	orch, mockTrigger, _, _ := newTestOrchestrator(t, ctrl)
+
+	trig := domain.TriggerConfig{Method: "GET", URL: "http://x", Extract: map[string]string{"user_id": "id"}}
+	def := domain.TestDefinition{
+		ID:        "t1",
+		Enabled:   true,
+		Variables: map[string]string{"user_id": "static-value"},
+		Triggers:  []domain.TriggerConfig{trig},
+	}
+
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), trig, gomock.Any(), gomock.Any()).
+		Return(map[string]string{"user_id": "dynamic-42"}, nil)
+
+	results := orch.RunSequence(context.Background(), []domain.TestDefinition{def}, SequenceConfig{})
+
+	if got := results[0].TriggerVars["user_id"]; got != "dynamic-42" {
+		t.Errorf("expected extract to override variable, got %q", got)
+	}
+}
+
+func TestVariables_ReservedNamesIgnored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	orch, mockTrigger, _, _ := newTestOrchestrator(t, ctrl)
+
+	trig := domain.TriggerConfig{Method: "GET", URL: "http://x"}
+	def := domain.TestDefinition{
+		ID:        "t1",
+		Enabled:   true,
+		Variables: map[string]string{"run_id": "overridden", "test_id": "overridden", "custom": "ok"},
+		Triggers:  []domain.TriggerConfig{trig},
+	}
+
+	var receivedVars map[string]string
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), trig, gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ domain.TriggerConfig, runID string, vars map[string]string) (map[string]string, error) {
+			receivedVars = vars
+
+			return map[string]string{}, nil
+		}).
+		Times(1)
+
+	orch.RunSequence(context.Background(), []domain.TestDefinition{def}, SequenceConfig{})
+
+	if receivedVars["run_id"] == "overridden" {
+		t.Error("expected reserved name run_id not to be overridden by variables block")
+	}
+
+	if receivedVars["run_id"] == "" {
+		t.Error("expected builtin run_id to remain set")
+	}
+
+	if _, ok := receivedVars["test_id"]; ok {
+		t.Error("expected reserved name test_id not to be present from variables block")
+	}
+
+	if receivedVars["custom"] != "ok" {
+		t.Errorf("expected non-reserved custom var to be injected, got %q", receivedVars["custom"])
+	}
+}
+
 func TestRunSequence_TriggerVarsPopulatedOnFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -292,4 +452,39 @@ func TestRunSequence_TriggerVarsPopulatedOnFailure(t *testing.T) {
 	}
 
 	<-notified
+}
+
+func TestRunSequence_UnknownTriggerTypeFailsStep(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	orch, mockTrigger, _, mockNotifier := newTestOrchestrator(t, ctrl)
+
+	def := domain.TestDefinition{
+		ID:      "t1",
+		Enabled: true,
+		Triggers: []domain.TriggerConfig{
+			{Type: "smtp"},
+		},
+	}
+
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(0)
+
+	mockNotifier.EXPECT().
+		Notify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil).
+		MinTimes(0)
+
+	results := orch.RunSequence(context.Background(), []domain.TestDefinition{def}, SequenceConfig{})
+	result := results[0]
+
+	if result.Status != domain.StatusError {
+		t.Fatalf("expected status %q, got %q", domain.StatusError, result.Status)
+	}
+
+	if !strings.Contains(result.Error, "unknown trigger type") {
+		t.Errorf("expected error to mention unknown trigger type, got %q", result.Error)
+	}
 }

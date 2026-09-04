@@ -8,23 +8,27 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 
-	"github.com/tidwall/gjson"
-
+	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
 	"e2e-framework/internal/pkg/template"
 )
 
 type HTTPTrigger struct {
-	client *http.Client
+	client     *http.Client
+	assertions *triggerasserts.TriggerAssertionRegistry
 }
 
-func NewHTTPTrigger() *HTTPTrigger {
+func NewHTTPTrigger(registry *triggerasserts.TriggerAssertionRegistry) *HTTPTrigger {
+	if registry == nil {
+		registry = triggerasserts.NewDefaultTriggerAssertionRegistry()
+	}
+
 	return &HTTPTrigger{
-		client: &http.Client{},
+		client:     &http.Client{},
+		assertions: registry,
 	}
 }
 
@@ -42,7 +46,10 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	headers := template.ReplaceHeaders(def.Headers, vars)
 
-	var reqBody io.Reader
+	var (
+		reqBody  io.Reader
+		bodyText string
+	)
 	if def.Body != nil {
 		bodyMap := template.ReplaceMap(def.Body, vars)
 
@@ -60,14 +67,20 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 			for k, v := range bodyMap {
 				form.Set(k, fmt.Sprintf("%v", v))
 			}
-			reqBody = strings.NewReader(form.Encode())
+			bodyText = form.Encode()
+			reqBody = strings.NewReader(bodyText)
 		} else {
 			b, err := json.Marshal(bodyMap)
 			if err != nil {
 				return nil, fmt.Errorf("%w: failed to serialize trigger body: %v", domain.ErrTriggerFailed, err)
 			}
+			bodyText = string(b)
 			reqBody = bytes.NewReader(b)
 		}
+	}
+
+	if reason := unresolvedTriggerReason(targetURL, headers, bodyText); reason != "" {
+		return nil, fmt.Errorf("%w: %s", domain.ErrTriggerFailed, reason)
 	}
 
 	reqCtx := ctx
@@ -122,7 +135,7 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	flatResp := httputil.FlattenJSON(respPayload)
 
-	if err := runResponseAssertions(def.ResponseAssertions, flatResp, rawResp, vars); err != nil {
+	if err := t.assertions.Run(def.ResponseAssertions, flatResp, rawResp, vars); err != nil {
 		return nil, err
 	}
 
@@ -136,74 +149,20 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 	return extracted, nil
 }
 
-func runResponseAssertions(assertions []domain.AssertionConfig, flatResp map[string]string, rawBody []byte, vars map[string]string) error {
-	for _, cfg := range assertions {
-		var (
-			resolvedValue  = template.ReplaceString(cfg.Value, vars)
-			field          = strings.ToLower(cfg.Field)
-			actual, exists = flatResp[field]
-			assertErr      error
-		)
+func unresolvedTriggerReason(targetURL string, headers map[string]string, body string) string {
+	if template.HasUnresolved(targetURL) {
+		return fmt.Sprintf("trigger url %q contains an unresolved template placeholder", targetURL)
+	}
 
-		switch cfg.Type {
-		case "equals":
-			if actual != resolvedValue {
-				assertErr = fmt.Errorf("field %q: expected %q, got %q", cfg.Field, resolvedValue, actual)
-			}
-		case "contains":
-			if !strings.Contains(actual, resolvedValue) {
-				assertErr = fmt.Errorf("field %q: expected to contain %q, got %q", cfg.Field, resolvedValue, actual)
-			}
-		case "not_contains":
-			if strings.Contains(actual, resolvedValue) {
-				assertErr = fmt.Errorf("field %q: expected not to contain %q, got %q", cfg.Field, resolvedValue, actual)
-			}
-		case "present":
-			if !exists || actual == "" {
-				assertErr = fmt.Errorf("field %q: expected to be present, but was empty or missing", cfg.Field)
-			}
-		case "matches":
-			re, compErr := regexp.Compile(resolvedValue)
-			if compErr != nil {
-				assertErr = fmt.Errorf("field %q: invalid regex pattern %q: %v", cfg.Field, resolvedValue, compErr)
-			} else if !re.MatchString(actual) {
-				assertErr = fmt.Errorf("field %q: expected to match pattern %q, got %q", cfg.Field, resolvedValue, actual)
-			}
-		case "array_contains", "map_contains":
-			if !walkFind(gjson.Get(string(rawBody), cfg.Field), resolvedValue) {
-				assertErr = fmt.Errorf("field %q: no element with value %q found", cfg.Field, resolvedValue)
-			}
-		case "length":
-			lenKey := field + ".__len__"
-			actualLen, lenExists := flatResp[lenKey]
-			if !lenExists {
-				assertErr = fmt.Errorf("field %q: field is not an array or does not exist", cfg.Field)
-			} else if actualLen != resolvedValue {
-				assertErr = fmt.Errorf("field %q: expected length %s, got %s", cfg.Field, resolvedValue, actualLen)
-			}
-		default:
-			assertErr = fmt.Errorf("unknown response_assertions type %q", cfg.Type)
-		}
-
-		if assertErr != nil {
-			return fmt.Errorf("%w: response assertion failed: %v | response body: %s", domain.ErrTriggerFailed, assertErr, rawBody)
+	for k, v := range headers {
+		if template.HasUnresolved(v) {
+			return fmt.Sprintf("trigger header %q contains an unresolved template placeholder", k)
 		}
 	}
 
-	return nil
-}
-
-func walkFind(r gjson.Result, target string) bool {
-	if r.IsArray() {
-		found := false
-		r.ForEach(func(_, v gjson.Result) bool {
-			if walkFind(v, target) {
-				found = true
-				return false
-			}
-			return true
-		})
-		return found
+	if template.HasUnresolved(body) {
+		return fmt.Sprintf("trigger body %q contains an unresolved template placeholder", body)
 	}
-	return r.String() == target
+
+	return ""
 }

@@ -12,7 +12,8 @@ import (
 	"e2e-framework/internal/adapters/primary/api"
 	"e2e-framework/internal/adapters/primary/cron"
 	"e2e-framework/internal/adapters/primary/webhook"
-	"e2e-framework/internal/adapters/secondary/assertion"
+	receiverasserts "e2e-framework/internal/adapters/secondary/assertions/receiver"
+	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/adapters/secondary/notifier"
 	"e2e-framework/internal/adapters/secondary/receiver"
 	"e2e-framework/internal/adapters/secondary/receiver/imap"
@@ -66,15 +67,34 @@ func main() {
 	}
 	defer redisStore.Close()
 
-	httpTrigger := trigger.NewHTTPTrigger()
+	triggerAssertionReg := triggerasserts.NewTriggerAssertionRegistry()
+	triggerAssertionReg.Register("equals", triggerasserts.NewEqualsAssertion)
+	triggerAssertionReg.Register("contains", triggerasserts.NewContainsAssertion)
+	triggerAssertionReg.Register("not_contains", triggerasserts.NewNotContainsAssertion)
+	triggerAssertionReg.Register("present", triggerasserts.NewPresentAssertion)
+	triggerAssertionReg.Register("matches", triggerasserts.NewMatchesAssertion)
+	triggerAssertionReg.Register("array_contains", triggerasserts.NewArrayContainsAssertion)
+	triggerAssertionReg.Register("map_contains", triggerasserts.NewMapContainsAssertion)
+	triggerAssertionReg.Register("length", triggerasserts.NewLengthAssertion)
+	triggerAssertionReg.Register("int_eq", triggerasserts.NewIntEqAssertion)
+	triggerAssertionReg.Register("int_gt", triggerasserts.NewIntGtAssertion)
+	triggerAssertionReg.Register("int_gte", triggerasserts.NewIntGteAssertion)
+	triggerAssertionReg.Register("int_lt", triggerasserts.NewIntLtAssertion)
+	triggerAssertionReg.Register("int_lte", triggerasserts.NewIntLteAssertion)
+
+	triggerReg := trigger.NewTriggerRegistry()
+	triggerReg.Register(domain.HTTPTriggerType, func(options map[string]string) (ports.Trigger, error) {
+		return trigger.NewHTTPTrigger(triggerAssertionReg), nil
+	})
+
 	httpNotifier := notifier.NewHTTPNotifier()
 
-	assertionReg := assertion.NewAssertionRegistry()
-	assertionReg.Register("contains", assertion.NewContainsAssertion)
-	assertionReg.Register("equals", assertion.NewEqualsAssertion)
-	assertionReg.Register("matches", assertion.NewMatchesAssertion)
-	assertionReg.Register("present", assertion.NewPresentAssertion)
-	assertionReg.Register("not_contains", assertion.NewNotContainsAssertion)
+	assertionReg := receiverasserts.NewReceiverAssertionRegistry()
+	assertionReg.Register("contains", receiverasserts.NewContainsAssertion)
+	assertionReg.Register("equals", receiverasserts.NewEqualsAssertion)
+	assertionReg.Register("matches", receiverasserts.NewMatchesAssertion)
+	assertionReg.Register("present", receiverasserts.NewPresentAssertion)
+	assertionReg.Register("not_contains", receiverasserts.NewNotContainsAssertion)
 
 	receiverReg := receiver.NewReceiverRegistry()
 	receiverReg.Register(
@@ -92,7 +112,7 @@ func main() {
 
 	// Core Orchestrator
 	orchestrator := services.NewOrchestrator(
-		httpTrigger,
+		triggerReg,
 		redisStore,
 		receiverReg,
 		assertionReg,

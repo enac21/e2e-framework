@@ -5,6 +5,42 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-08-31] — Trigger registry (`type`/`options` per step)
+
+- **New `TriggerRegistry`** (`internal/adapters/secondary/trigger/registry.go`): factory pattern mirroring `receiver.ReceiverRegistry` — `NewTriggerRegistry`, `Register(typeName, factory)`, `Create(typeName, options)` with `domain.ErrConfiguration` for unknown types.
+- **`TriggerConfig` gained `type` and `options`** (`domain/test.go`): `EffectiveType()` defaults empty `type` to `domain.HTTPTriggerType` (`"http"`). Both fields are inert on the bundled `http` trigger (its factory uses the shared response-assertions registry and ignores `options`, documented as reserved/extensible).
+- **Orchestrator now creates the trigger per step** (`orchestrator.go`): the injected `ports.Trigger` is replaced by `*trigger.TriggerRegistry`; `executeSequential` calls `o.triggers.Create(step.EffectiveType(), step.Options)` before the retry loop. An unregistered trigger type fails the step with a clear `unknown trigger type` error (steps after it do not run, `on_failure` still fires). Existing behavior (retry, `delay_before`, receivers, extract, assertions, on_failure) is preserved.
+- **Wiring** (`cmd/server/main.go`): `triggerReg.Register(domain.HTTPTriggerType, ...)` builds the HTTP trigger; `NewOrchestrator` receives the registry instead of a trigger instance.
+- **New tests**: `trigger/registry_test.go` (register/create, unknown type → `ErrConfiguration`, factory error propagation, options passthrough), `domain/trigger_test.go` (EffectiveType + YAML decode of `type`/`options`), `orchestrator_test.go` (`TestRunSequence_UnknownTriggerTypeFailsStep` — step fails, trigger not executed).
+- **Docs**: README trigger section (type/options + how to add a new trigger type), skill trigger bullet, and `docs/PLAN-trigger-registry.md`.
+
+---
+
+## [2026-08-31] — Refactor assertions to registry pattern (receiver & trigger)
+
+- **Receiver assertions moved** from `internal/adapters/secondary/assertion` (package `assertion`) into `internal/adapters/secondary/receiver` (package `receiver`). `AssertionRegistry` renamed to **`ReceiverAssertionRegistry`** (`NewReceiverAssertionRegistry`); consumers (`main.go`, orchestrator, tests) now import the `receiver` package.
+- **Trigger `response_assertions` refactored from a `switch` to a registry**: new `TriggerAssertionRegistry` (`NewTriggerAssertionRegistry`, `Register`, `Create`, `Run`) in `internal/adapters/secondary/trigger`. Each assertion is now a factory (`NewEqualsAssertion`, `NewContainsAssertion`, `NewNotContainsAssertion`, `NewPresentAssertion`, `NewMatchesAssertion`, `NewArrayContainsAssertion`, `NewMapContainsAssertion`, `NewLengthAssertion`, `NewIntEqAssertion`, `NewIntGtAssertion`, `NewIntGteAssertion`, `NewIntLtAssertion`, `NewIntLteAssertion`) evaluating a `ResponseAssertionContext` (field, resolved value, flattened response, raw body).
+- `HTTPTrigger` now receives the registry as constructor argument (`NewHTTPTrigger(registry)`); passing `nil` falls back to the registry with all built-in assertions registered. `main.go` wires both registries explicitly.
+- **Behavior preserved**: same assertion semantics, same error messages/wrapping (`ErrTriggerFailed` + raw body), same variable substitution in expected values. Adding a new response_assertions type is now open/closed: a new factory file plus one `Register` line in `main.go`.
+
+---
+
+- **New int response assertions**: `int_eq`, `int_gt`, `int_gte`, `int_lt`, `int_lte` added to trigger `response_assertions`. Numeric comparison (not string); both `field` value and `value` are parsed as 64-bit integers (whitespace-trimmed). If either side is not an integer, the assertion fails with a clear message. Existing string assertions (`equals`, `contains`, …) are untouched.
+- **New stateful operator `{{++(var)}}` / `{{--(var)}}`**: evaluated at the very start of `template.ReplaceString`. Replaces the token with the **already incremented/decremented** value and **persists** the mutation in `vars` (shared by reference through trigger steps, so counters advance across `extract`/`variables` values and later steps). Two evaluation moments: **before the request** (url/headers/body using vars from `variables:` or previous extracts) and **after the request** in later steps (on a var extracted by a prior trigger).
+- **Undeclared var**: an **undefined** variable is treated as `0` and created by the operator — `{{++(seq)}}` resolves to `1` (leaving `seq=1`), `{{--(seq)}}` resolves to `-1`. A variable that **exists but is not an integer** is left unresolved (`HasUnresolved` → `true`), no panic, no mutation. Consumers: trigger aborts with a clear `domain.ErrTriggerFailed`, `on_failure.calls` skips the call, assertions simply don't match.
+- **Unresolved guard in HTTP trigger**: `template.Execute` now checks `HasUnresolved` over the resolved url, each header and the serialized body **before** `client.Do`, aborting with `domain.ErrTriggerFailed` and the offending field instead of sending a literal `{{...}}` to the API.
+- **New tests**: `template_test.go` — sequential increments (1,2,3…), decrement, undefined var defaulting to `0` (created: `{{++}}` → 1,2 and `{{--}}` → -1), non-integer var left unresolved, persistence, and updated-value visibility in the same string; `trigger/http_test.go` — pass/fail per int operator, numeric-vs-string comparison, non-integer failures, variable substitution, trigger abort on unresolved increments (existing **non-integer** var) in url/body, and an undefined increment var being created and sent as `1`.
+- **Docs**: `README.md` — int assertion table + example in "Response Assertions" and a new "Increment/Decrement Operator" subsection; `e2e-test-writer` skill — int comparators, operator rules and Quality Checklist items.
+
+---
+
+## [2026-08-29] — Variables section & yaml anchor usage docs
+
+- **New variables section**: This section allows you to create a shared vars across all test steps.
+- **Yaml anchor docs**: Documentation about how to use anchors to avoid duplication contennt in test definition.
+
+---
+
 ## [2026-08-09] — `{{uuid()}}` generator & extensible template generator registry
 
 - **New generator**: `{{uuid()}}` — resolves to a random UUID v4 (via `github.com/google/uuid`). Works everywhere template resolution happens: URLs, headers, bodies, assertions and `on_failure.calls`.

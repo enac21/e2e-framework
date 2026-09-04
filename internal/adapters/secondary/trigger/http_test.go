@@ -1,13 +1,15 @@
 package trigger
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/tidwall/gjson"
-
+	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
 )
@@ -20,89 +22,6 @@ func mustJSON(v any) []byte {
 	return b
 }
 
-func TestWalkFind(t *testing.T) {
-	tests := []struct {
-		name   string
-		json   string
-		path   string
-		target string
-		want   bool
-	}{
-		{
-			name:   "flat array hit",
-			json:   `{"items":["a","b","c"]}`,
-			path:   "items",
-			target: "b",
-			want:   true,
-		},
-		{
-			name:   "flat array miss",
-			json:   `{"items":["a","b","c"]}`,
-			path:   "items",
-			target: "d",
-			want:   false,
-		},
-		{
-			name:   "array of objects nested field",
-			json:   `{"items":[{"name":"Alice"},{"name":"Bob"}]}`,
-			path:   "items.#.name",
-			target: "Alice",
-			want:   true,
-		},
-		{
-			name:   "doubly nested arrays",
-			json:   `{"data":[{"statuses":[{"general_status":"requested"},{"general_status":"sending"}]}]}`,
-			path:   "data.#.statuses.#.general_status",
-			target: "requested",
-			want:   true,
-		},
-		{
-			name:   "doubly nested miss",
-			json:   `{"data":[{"statuses":[{"general_status":"requested"},{"general_status":"sending"}]}]}`,
-			path:   "data.#.statuses.#.general_status",
-			target: "delivered",
-			want:   false,
-		},
-		{
-			name:   "map values wildcard hit",
-			json:   `{"labels":{"env":"prod","tier":"web"}}`,
-			path:   "labels.@values",
-			target: "prod",
-			want:   true,
-		},
-		{
-			name:   "map values wildcard miss",
-			json:   `{"labels":{"env":"prod","tier":"web"}}`,
-			path:   "labels.@values",
-			target: "staging",
-			want:   false,
-		},
-		{
-			name:   "scalar result",
-			json:   `{"status":"active"}`,
-			path:   "status",
-			target: "active",
-			want:   true,
-		},
-		{
-			name:   "missing path",
-			json:   `{"status":"active"}`,
-			path:   "nonexistent",
-			target: "active",
-			want:   false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := walkFind(gjson.Get(tc.json, tc.path), tc.target)
-			if got != tc.want {
-				t.Errorf("walkFind(%q, %q) = %v, want %v", tc.path, tc.target, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestRunResponseAssertions(t *testing.T) {
 	type assertion struct {
 		typ   string
@@ -110,13 +29,14 @@ func TestRunResponseAssertions(t *testing.T) {
 		value string
 	}
 
+	reg := triggerasserts.NewDefaultTriggerAssertionRegistry()
 	run := func(t *testing.T, payload any, vars map[string]string, a assertion) error {
 		t.Helper()
 		raw := mustJSON(payload)
 		var m map[string]any
 		_ = json.Unmarshal(raw, &m)
 		flat := httputil.FlattenJSON(m)
-		return runResponseAssertions(
+		return reg.Run(
 			[]domain.AssertionConfig{{Type: a.typ, Field: a.field, Value: a.value}},
 			flat, raw, vars,
 		)
@@ -301,4 +221,143 @@ func TestRunResponseAssertions(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+
+	t.Run("int_eq pass", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 10}, nil, assertion{"int_eq", "count", "10"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("int_eq fail", func(t *testing.T) {
+		err := run(t, map[string]any{"count": 10}, nil, assertion{"int_eq", "count", "11"})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		if !errors.Is(err, domain.ErrTriggerFailed) {
+			t.Fatalf("want ErrTriggerFailed, got %v", err)
+		}
+	})
+
+	t.Run("int_gt numeric comparison", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 10}, nil, assertion{"int_gt", "count", "9"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("int_gt fail", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 9}, nil, assertion{"int_gt", "count", "10"}); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("int_gte pass equal", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 10}, nil, assertion{"int_gte", "count", "10"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("int_gte fail", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 9}, nil, assertion{"int_gte", "count", "10"}); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("int_lt pass", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 8}, nil, assertion{"int_lt", "count", "9"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("int_lt fail", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 10}, nil, assertion{"int_lt", "count", "9"}); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("int_lte pass equal", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 9}, nil, assertion{"int_lte", "count", "9"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("int_lte fail", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 10}, nil, assertion{"int_lte", "count", "9"}); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("int fail actual not integer", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": "ten"}, nil, assertion{"int_eq", "count", "10"}); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("int fail value not integer", func(t *testing.T) {
+		if err := run(t, map[string]any{"count": 10}, nil, assertion{"int_eq", "count", "ten"}); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("int variable substitution in value", func(t *testing.T) {
+		vars := map[string]string{"expected_count": "10"}
+		if err := run(t, map[string]any{"count": 10}, vars, assertion{"int_eq", "count", "{{expected_count}}"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestExecute_AbortsOnUnresolvedIncrement(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request must not be sent when a placeholder stays unresolved")
+	}))
+	defer srv.Close()
+
+	tr := NewHTTPTrigger(nil)
+	vars := map[string]string{"broken": "abc"}
+
+	t.Run("unresolved in url", func(t *testing.T) {
+		_, err := tr.Execute(context.Background(), domain.TriggerConfig{
+			URL: srv.URL + "/{{++(broken)}}",
+		}, "run-1", vars)
+		if !errors.Is(err, domain.ErrTriggerFailed) {
+			t.Fatalf("want ErrTriggerFailed, got %v", err)
+		}
+	})
+
+	t.Run("unresolved in body", func(t *testing.T) {
+		_, err := tr.Execute(context.Background(), domain.TriggerConfig{
+			URL:  srv.URL,
+			Body: map[string]any{"counter": "{{++(broken)}}"},
+		}, "run-1", vars)
+		if !errors.Is(err, domain.ErrTriggerFailed) {
+			t.Fatalf("want ErrTriggerFailed, got %v", err)
+		}
+	})
+}
+
+func TestExecute_IncrementCreatesMissingVar(t *testing.T) {
+	gotPath := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tr := NewHTTPTrigger(nil)
+	vars := map[string]string{}
+	_, err := tr.Execute(context.Background(), domain.TriggerConfig{
+		URL: srv.URL + "/{{++(fresh)}}",
+	}, "run-1", vars)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotPath != "/1" {
+		t.Fatalf("want path /1, got %s", gotPath)
+	}
+
+	if vars["fresh"] != "1" {
+		t.Fatalf("expected vars[fresh]=1, got %q", vars["fresh"])
+	}
 }

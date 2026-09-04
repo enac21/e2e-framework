@@ -2,6 +2,7 @@ package template
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 
 	"e2e-framework/internal/pkg/template/generators"
@@ -9,26 +10,14 @@ import (
 
 var (
 	generatorRegex   = regexp.MustCompile(`\{\{(\w+)\(([^)]*)\)\}\}`)
+	incrementRegex   = regexp.MustCompile(`\{\{\+\+\(([^)]*)\)\}\}`)
+	decrementRegex   = regexp.MustCompile(`\{\{--\(([^)]*)\)\}\}`)
 	placeholderRegex = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 )
 
-func resolveGenerators(s string) string {
-	return generatorRegex.ReplaceAllStringFunc(s, func(match string) string {
-		sub := generatorRegex.FindStringSubmatch(match)
-		if len(sub) < 3 {
-			return match
-		}
-
-		result, generated := generators.Resolve(sub[1], sub[2])
-		if !generated {
-			return match
-		}
-
-		return result
-	})
-}
-
 func ReplaceString(s string, vars map[string]string) string {
+	s = resolveIncrements(s, vars)
+
 	for k, v := range vars {
 		s = strings.ReplaceAll(s, "{{"+k+"}}", v)
 	}
@@ -91,4 +80,58 @@ func replaceAny(v any, vars map[string]string) any {
 	default:
 		return val
 	}
+}
+
+func resolveGenerators(s string) string {
+	return generatorRegex.ReplaceAllStringFunc(s, func(match string) string {
+		sub := generatorRegex.FindStringSubmatch(match)
+		if len(sub) < 3 {
+			return match
+		}
+
+		result, generated := generators.Resolve(sub[1], sub[2])
+		if !generated {
+			return match
+		}
+
+		return result
+	})
+}
+
+func resolveIncrements(s string, vars map[string]string) string {
+	s = replaceIncrements(s, vars, incrementRegex, 1)
+
+	return replaceIncrements(s, vars, decrementRegex, -1)
+}
+
+func replaceIncrements(s string, vars map[string]string, re *regexp.Regexp, delta int64) string {
+	return re.ReplaceAllStringFunc(s, func(match string) string {
+		sub := re.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+
+		name := strings.TrimSpace(sub[1])
+		raw, exists := vars[name]
+		cur, ok := parseVarInt(raw)
+		if !ok {
+			if exists {
+				return match
+			}
+			cur = 0
+		}
+
+		vars[name] = strconv.FormatInt(cur+delta, 10)
+
+		return vars[name]
+	})
+}
+
+func parseVarInt(s string) (int64, bool) {
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	return n, true
 }

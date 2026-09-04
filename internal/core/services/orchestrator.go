@@ -8,12 +8,19 @@ import (
 	"sync"
 	"time"
 
-	"e2e-framework/internal/adapters/secondary/assertion"
+	receiverasserts "e2e-framework/internal/adapters/secondary/assertions/receiver"
 	"e2e-framework/internal/adapters/secondary/receiver"
+	"e2e-framework/internal/adapters/secondary/trigger"
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/pkg/template"
 )
+
+var reservedVarNames = map[string]bool{
+	"run_id":  true,
+	"test_id": true,
+	"error":   true,
+}
 
 type activeReceiver struct {
 	cfg      domain.ReceiverConfig
@@ -21,22 +28,22 @@ type activeReceiver struct {
 }
 
 type Orchestrator struct {
-	trigger    ports.Trigger
+	triggers   *trigger.TriggerRegistry
 	store      ports.Store
 	receivers  *receiver.ReceiverRegistry
-	assertions *assertion.AssertionRegistry
+	assertions *receiverasserts.ReceiverAssertionRegistry
 	notifier   ports.Notifier
 }
 
 func NewOrchestrator(
-	trigger ports.Trigger,
+	triggers *trigger.TriggerRegistry,
 	store ports.Store,
 	receivers *receiver.ReceiverRegistry,
-	assertions *assertion.AssertionRegistry,
+	assertions *receiverasserts.ReceiverAssertionRegistry,
 	notifier ports.Notifier,
 ) *Orchestrator {
 	return &Orchestrator{
-		trigger:    trigger,
+		triggers:   triggers,
 		store:      store,
 		receivers:  receivers,
 		assertions: assertions,
@@ -114,14 +121,37 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 	return result
 }
 
-func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDefinition, runID string, result *domain.TestResult) {
+func (o *Orchestrator) executeSequential(
+	ctx context.Context,
+	def domain.TestDefinition,
+	runID string,
+	result *domain.TestResult,
+) {
 	triggerVars := make(map[string]string)
 	triggerVars["run_id"] = runID
+
+	for k, v := range def.Variables {
+		if reservedVarNames[k] {
+			log.Printf("[%s] reserved variable name %q ignored in variables block", runID, k)
+
+			continue
+		}
+
+		triggerVars[k] = template.ReplaceString(v, triggerVars)
+	}
 
 	for i, triggerStep := range def.Triggers {
 		if triggerStep.DelayBefore > 0 {
 			log.Printf("[%s] step %d waiting %s before execution", runID, i+1, triggerStep.DelayBefore)
 			time.Sleep(triggerStep.DelayBefore)
+		}
+
+		stepTrigger, err := o.triggers.Create(triggerStep.EffectiveType(), triggerStep.Options)
+		if err != nil {
+			result.TriggerVars = triggerVars
+			o.failResult(result, err.Error())
+
+			return
 		}
 
 		reserved, err := o.reserveRecipients(ctx, triggerStep.Receivers, runID)
@@ -150,7 +180,7 @@ func (o *Orchestrator) executeSequential(ctx context.Context, def domain.TestDef
 				log.Printf("[%s] step %d retrying (attempt %d/%d)", runID, i+1, attempt, stepMaxAttempts)
 			}
 
-			stepVars, triggerErr := o.trigger.Execute(ctx, triggerStep, runID, triggerVars)
+			stepVars, triggerErr := stepTrigger.Execute(ctx, triggerStep, runID, triggerVars)
 			if triggerErr != nil {
 				lastTriggerErr = triggerErr
 				log.Printf("[%s] step %d attempt %d/%d failed: %v", runID, i+1, attempt, stepMaxAttempts, triggerErr)

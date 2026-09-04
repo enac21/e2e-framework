@@ -24,6 +24,7 @@ bin/
 #ai
 .agents
 docs/plan-*.md
+docs/prompt*.md
 
 # Environment variables
 .env
@@ -38,3 +39,6 @@ __debug*
 
 # Temp files
 tests/inbox/*
+
+# Config files
+configs/config.yaml
