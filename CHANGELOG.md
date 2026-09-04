@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/enac21/e2e-framework/compare/v0.2.0...v0.3.0) (2026-09-04)
+
+
+### Features
+
+* int response assertions, increment operator & default zero for missing vars ([6efb41e](https://github.com/enac21/e2e-framework/commit/6efb41e29af6121ea18dd2df4714e8f635e63b0a))
+* variables section & readme adjust ([3f35c62](https://github.com/enac21/e2e-framework/commit/3f35c625427c7d464aae1acd06e4c364df1cf7ed))
+* variables section & README adjust ([29311bd](https://github.com/enac21/e2e-framework/commit/29311bd85896e9fa0c9443b68bb721dc2ea92b43))
+
 ## [0.2.0](https://github.com/enac21/e2e-framework/compare/v0.1.1...v0.2.0) (2026-08-09)
 
 
