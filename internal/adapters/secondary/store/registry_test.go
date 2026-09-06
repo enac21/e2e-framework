@@ -24,7 +24,7 @@ func TestStoreRegistry_RegisterAndCreate(t *testing.T) {
 		return mocks.NewMockStore(ctrl), nil
 	})
 
-	instance, err := reg.Create("fake", config.StoreConfig{Type: "fake"})
+	instance, err := reg.Create(config.StoreConfig{Type: "fake"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,7 +41,20 @@ func TestStoreRegistry_RegisterAndCreate(t *testing.T) {
 func TestStoreRegistry_CreateUnknownType(t *testing.T) {
 	reg := NewStoreRegistry()
 
-	_, err := reg.Create("mongo", config.StoreConfig{Type: "mongo"})
+	_, err := reg.Create(config.StoreConfig{Type: "mongo"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	if !errors.Is(err, domain.ErrConfiguration) {
+		t.Fatalf("want ErrConfiguration, got %v", err)
+	}
+}
+
+func TestStoreRegistry_CreateEmptyType(t *testing.T) {
+	reg := NewStoreRegistry()
+
+	_, err := reg.Create(config.StoreConfig{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -57,7 +70,7 @@ func TestStoreRegistry_FactoryErrorPropagates(t *testing.T) {
 		return nil, errors.New("factory boom")
 	})
 
-	_, err := reg.Create("broken", config.StoreConfig{})
+	_, err := reg.Create(config.StoreConfig{Type: "broken"})
 	if err == nil || err.Error() != "factory boom" {
 		t.Fatalf("expected factory error to propagate, got %v", err)
 	}

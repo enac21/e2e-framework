@@ -24,10 +24,15 @@ func (r *StoreRegistry) Register(typeName string, factory StoreFactory) {
 	r.factories[typeName] = factory
 }
 
-func (r *StoreRegistry) Create(typeName string, cfg config.StoreConfig) (ports.Store, error) {
-	if factory, ok := r.factories[typeName]; ok {
-		return factory(cfg)
+func (r *StoreRegistry) Create(cfg config.StoreConfig) (ports.Store, error) {
+	if cfg.Type == "" {
+		return nil, fmt.Errorf("%w: store type not configured", domain.ErrConfiguration)
 	}
 
-	return nil, fmt.Errorf("%w: unknown store type: %q", domain.ErrConfiguration, typeName)
+	factory, ok := r.factories[cfg.Type]
+	if !ok {
+		return nil, fmt.Errorf("%w: unknown store type: %q", domain.ErrConfiguration, cfg.Type)
+	}
+
+	return factory(cfg)
 }

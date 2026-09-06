@@ -6,32 +6,32 @@ import (
 	"e2e-framework/internal/core/domain"
 )
 
-type NoopStore struct{}
+type DisabledStore struct{}
 
-func NewNoopStore() *NoopStore {
-	return &NoopStore{}
+func NewDisabledStore() *DisabledStore {
+	return &DisabledStore{}
 }
 
-func (s *NoopStore) Deposit(ctx context.Context, msg *domain.Message) error {
+func (s *DisabledStore) Deposit(ctx context.Context, msg *domain.Message) error {
 	return nil
 }
 
-func (s *NoopStore) Claim(ctx context.Context, runID string, receiverType string) (*domain.Message, error) {
+func (s *DisabledStore) Claim(ctx context.Context, runID string, receiverType string) (*domain.Message, error) {
 	return nil, nil
 }
 
-func (s *NoopStore) Reserve(ctx context.Context, channel string, recipient string, runID string) error {
+func (s *DisabledStore) Reserve(ctx context.Context, channel string, recipient string, runID string) error {
 	return nil
 }
 
-func (s *NoopStore) Release(ctx context.Context, channel string, recipient string) error {
+func (s *DisabledStore) Release(ctx context.Context, channel string, recipient string) error {
 	return nil
 }
 
-func (s *NoopStore) Delete(ctx context.Context, runID string, receiverType string) error {
+func (s *DisabledStore) Delete(ctx context.Context, runID string, receiverType string) error {
 	return nil
 }
 
-func (s *NoopStore) Close() error {
+func (s *DisabledStore) Close() error {
 	return nil
 }

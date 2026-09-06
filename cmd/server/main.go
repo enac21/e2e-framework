@@ -66,10 +66,10 @@ func main() {
 		return store.NewMemoryStore(cfg.Memory), nil
 	})
 	storeReg.Register("disabled", func(cfg config.StoreConfig) (ports.Store, error) {
-		return store.NewNoopStore(), nil
+		return store.NewDisabledStore(), nil
 	})
 
-	s, err := storeReg.Create(cfg.Store.Type, cfg.Store)
+	s, err := storeReg.Create(cfg.Store)
 	if err != nil {
 		log.Fatalf("failed to create store: %v", err)
 	}

@@ -7,9 +7,9 @@ import (
 	"e2e-framework/internal/core/domain"
 )
 
-func TestNoopStore_NoOps(t *testing.T) {
+func TestDisabledStore_NoOps(t *testing.T) {
 	ctx := context.Background()
-	s := NewNoopStore()
+	s := NewDisabledStore()
 
 	msg := &domain.Message{RunID: "r", ReceiverType: "request"}
 
