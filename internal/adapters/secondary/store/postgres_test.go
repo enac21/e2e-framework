@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/config"
 )
 
 func newPostgresStoreForTest(t *testing.T) *PostgresStore {
@@ -19,7 +20,7 @@ func newPostgresStoreForTest(t *testing.T) *PostgresStore {
 		dsn = "postgres://e2e:e2e@localhost:5432/e2e"
 	}
 
-	s, err := NewPostgresStore(PostgresStoreConfig{DSN: dsn, TTL: time.Minute})
+	s, err := NewPostgresStore(config.PostgresStoreConfig{DSN: dsn, TTL: time.Minute})
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}

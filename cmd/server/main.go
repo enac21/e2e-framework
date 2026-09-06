@@ -56,36 +56,20 @@ func main() {
 	log.Printf("Loaded %d test definitions", len(tests))
 
 	storeReg := store.NewStoreRegistry()
-	storeReg.Register("redis", func(cfg store.StoreConfig) (ports.Store, error) {
+	storeReg.Register("redis", func(cfg config.StoreConfig) (ports.Store, error) {
 		return store.NewRedisStore(cfg.Redis)
 	})
-	storeReg.Register("postgres", func(cfg store.StoreConfig) (ports.Store, error) {
+	storeReg.Register("postgres", func(cfg config.StoreConfig) (ports.Store, error) {
 		return store.NewPostgresStore(cfg.Postgres)
 	})
-	storeReg.Register("memory", func(cfg store.StoreConfig) (ports.Store, error) {
+	storeReg.Register("memory", func(cfg config.StoreConfig) (ports.Store, error) {
 		return store.NewMemoryStore(cfg.Memory), nil
 	})
-	storeReg.Register("none", func(cfg store.StoreConfig) (ports.Store, error) {
+	storeReg.Register("disabled", func(cfg config.StoreConfig) (ports.Store, error) {
 		return store.NewNoopStore(), nil
 	})
 
-	s, err := storeReg.Create(cfg.Store.Type, store.StoreConfig{
-		Type: cfg.Store.Type,
-		Redis: store.RedisStoreConfig{
-			URL:         cfg.Store.Redis.URL,
-			Username:    cfg.Store.Redis.Username,
-			Password:    cfg.Store.Redis.Password,
-			ClusterMode: cfg.Store.Redis.ClusterMode,
-			TTL:         cfg.Store.Redis.TTL,
-		},
-		Postgres: store.PostgresStoreConfig{
-			DSN: cfg.Store.Postgres.DSN,
-			TTL: cfg.Store.Postgres.TTL,
-		},
-		Memory: store.MemoryStoreConfig{
-			TTL: cfg.Store.Memory.TTL,
-		},
-	})
+	s, err := storeReg.Create(cfg.Store.Type, cfg.Store)
 	if err != nil {
 		log.Fatalf("failed to create store: %v", err)
 	}

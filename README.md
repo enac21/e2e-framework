@@ -899,7 +899,7 @@ webhook:
   port: 8081           # Webhook ingestion server port (Twilio, Meta, etc.)
 
 store:
-  type: redis          # redis | postgres | memory | none   (default: redis)
+  type: redis          # redis | postgres | memory | disabled   (default: redis)
   redis:
     url: "{{env.REDIS_URL}}" //TODO - Cluster mode & credentials
     ttl: 300s          # How long received messages are kept
@@ -944,20 +944,20 @@ logging:
 
 The message store used to buffer received messages between the webhook
 ingestion and the `request` receiver is pluggable. Select the backend with the
-`store.type` key (`redis` | `postgres` | `memory` | `none`, default `redis`).
+`store.type` key (`redis` | `postgres` | `memory` | `disabled`, default `redis`).
 
 | Backend | Purpose |
 |---------|---------|
 | `redis` | **Default.** Distributed, supports cluster mode. Requires `REDIS_URL`. |
 | `postgres` | Distributed, relational. Requires `POSTGRES_DSN` (pgx/v5). Schema is created automatically on startup. |
 | `memory` | Single-process, in-memory, mutex-protected. No external dependency. Great for local dev and CI. |
-| `none` | Fully disables the database (no-op store). `request` receivers poll until their timeout. |
+| `disabled` | Fully disables the database (no-op store). `request` receivers poll until their timeout. |
 
 Only the section matching the selected backend is read; the others are ignored.
 `store.type` may be omitted — it defaults to `redis`, so existing config files
 keep working unchanged.
 
-> **Running without a DB:** set `store.type: none` (or `STORE_TYPE=none`). The
+> **Running without a DB:** set `store.type: disabled` (or `STORE_TYPE=disabled`). The
 > service starts with **no** database dependency. Any test that uses a
 > `request` (webhook) receiver will time out waiting for a message, which is
 > expected for DB-less runs — use this for pure HTTP-trigger tests.
@@ -968,7 +968,7 @@ keep working unchanged.
 |----------|----------|---------|-------------|
 | `REDIS_URL` | Yes (if `store.type: redis`) | `config.yaml` | Redis connection URL (e.g. `redis://localhost:6379`) |
 | `POSTGRES_DSN` | Yes (if `store.type: postgres`) | `config.yaml` | PostgreSQL connection DSN (pgx/v5 format) |
-| `STORE_TYPE` | No | `config.yaml` | Overrides `store.type` (`redis`/`postgres`/`memory`/`none`) |
+| `STORE_TYPE` | No | `config.yaml` | Overrides `store.type` (`redis`/`postgres`/`memory`/`disabled`) |
 | `JWT_SECRET` | Yes | `config.yaml` | Shared secret for JWT signing/validation |
 | `WEBHOOK_BASE_URL` | No | `config.yaml` | Base URL for webhook receiver callbacks |
 | `IMAP_HOST` | No | Test YAMLs | IMAP server hostname for email tests |

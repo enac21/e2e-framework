@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/config"
 )
 
 func newMemStoreWithTTL(ttl time.Duration) *MemoryStore {
-	return NewMemoryStore(MemoryStoreConfig{TTL: ttl})
+	return NewMemoryStore(config.MemoryStoreConfig{TTL: ttl})
 }
 
 func TestMemoryStore_DepositClaimRoundtrip(t *testing.T) {

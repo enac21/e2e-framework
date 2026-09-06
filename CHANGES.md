@@ -22,16 +22,16 @@ The format follows a chronological order, newest changes first.
 
 ---
 
-## [2026-09-06] — Pluggable store backends (Redis / PostgreSQL / In-Memory / none)
+## [2026-09-06] — Pluggable store backends (Redis / PostgreSQL / In-Memory / disabled)
 
 - **`StoreRegistry` factory** (`internal/adapters/secondary/store/registry.go`): mirrors the trigger registry — `NewStoreRegistry`, `Register(type, factory)`, `Create(type, cfg)` with `domain.ErrConfiguration` for unknown types. Adding a backend is now a new file + one `Register` line in `main.go` (Open/Closed).
 - **New backends** behind the same `ports.Store` contract:
   - **PostgreSQL** (`store/postgres.go`, new dependency `github.com/jackc/pgx/v5`): schema (`e2e_messages`, `e2e_reservations`) created idempotently on startup; idempotent `Deposit` (ON CONFLICT), non-deleting `Claim`, NX `Reserve`, `Release`/`Delete`, plus opportunistic purge of expired rows. Guarded by `//go:build integration`.
   - **In-memory** (`store/memory.go`): single-process, mutex-protected maps reproducing the Redis semantics (deposit/claim, TTL expiry, reservation NX conflict + TTL, release/delete).
-  - **none** (`store/none.go`): `NoopStore` fully disables the DB; `Claim` returns `(nil, nil)` so `request` receivers poll until their timeout — expected behaviour for DB-less runs.
-- **Config** (`config.go`): `store.type` (`redis`/`postgres`/`memory`/`none`, default `redis`), new `store.postgres` and `store.memory` sections, and a `STORE_TYPE` env override. Empty `store.type` defaults to redis (backward compatible). No connection is attempted when `type` is `none`.
+  - **disabled** (`store/disabled.go`): `NoopStore` fully disables the DB; `Claim` returns `(nil, nil)` so `request` receivers poll until their timeout — expected behaviour for DB-less runs.
+- **Config** (`config.go`): `store.type` (`redis`/`postgres`/`memory`/`disabled`, default `redis`), new `store.postgres` and `store.memory` sections, and a `STORE_TYPE` env override. Empty `store.type` defaults to redis (backward compatible). No connection is attempted when `type` is `disabled`.
 - **Wiring** (`cmd/server/main.go`): the store is built via the registry from `cfg.Store.Type`; the resulting `ports.Store` flows unchanged into the webhook server, `request` receiver and orchestrator.
-- **Tests**: `store/registry_test.go` (register/create, unknown type, error propagation), `store/memory_test.go` (semantic parity with Redis), `store/none_test.go` (all no-ops), `store/postgres_test.go` (integration), and `config_test.go` (store defaults + full parse + `STORE_TYPE` override).
+- **Tests**: `store/registry_test.go` (register/create, unknown type, error propagation), `store/memory_test.go` (semantic parity with Redis), `store/disabled_test.go` (all no-ops), `store/postgres_test.go` (integration), and `config_test.go` (store defaults + full parse + `STORE_TYPE` override).
 - **Docs**: README "Store backends" section + env var table (`POSTGRES_DSN`, `STORE_TYPE`), `CONTRIBUTING.md` "Adding a new store backend" guide, `configs/config.example.yaml`, and an optional `postgres` service in `docker-compose.yml`.
 
 ---

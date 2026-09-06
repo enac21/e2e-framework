@@ -13,7 +13,7 @@ auth:
   jwt_secret: "{{env.JWT_SECRET}}"
 
 store:
-  type: redis        # redis | postgres | memory | none   (default: redis)
+  type: redis        # redis | postgres | memory | disabled   (default: redis)
   redis:
     url: "{{env.REDIS_URL}}"
     ttl: 300s

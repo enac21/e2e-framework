@@ -1,35 +1,30 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"testing"
 
+	"go.uber.org/mock/gomock"
+
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
+	"e2e-framework/internal/core/ports/mocks"
+	"e2e-framework/internal/pkg/config"
 )
 
-type fakeStore struct{}
-
-func (fakeStore) Deposit(context.Context, *domain.Message) error { return nil }
-func (fakeStore) Claim(context.Context, string, string) (*domain.Message, error) {
-	return nil, nil
-}
-func (fakeStore) Reserve(context.Context, string, string, string) error { return nil }
-func (fakeStore) Release(context.Context, string, string) error         { return nil }
-func (fakeStore) Delete(context.Context, string, string) error          { return nil }
-func (fakeStore) Close() error                                          { return nil }
-
 func TestStoreRegistry_RegisterAndCreate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	reg := NewStoreRegistry()
 
-	var gotCfg StoreConfig
-	reg.Register("fake", func(cfg StoreConfig) (ports.Store, error) {
+	var gotCfg config.StoreConfig
+	reg.Register("fake", func(cfg config.StoreConfig) (ports.Store, error) {
 		gotCfg = cfg
-		return fakeStore{}, nil
+		return mocks.NewMockStore(ctrl), nil
 	})
 
-	instance, err := reg.Create("fake", StoreConfig{Type: "fake"})
+	instance, err := reg.Create("fake", config.StoreConfig{Type: "fake"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,7 +41,7 @@ func TestStoreRegistry_RegisterAndCreate(t *testing.T) {
 func TestStoreRegistry_CreateUnknownType(t *testing.T) {
 	reg := NewStoreRegistry()
 
-	_, err := reg.Create("mongo", StoreConfig{Type: "mongo"})
+	_, err := reg.Create("mongo", config.StoreConfig{Type: "mongo"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -58,11 +53,11 @@ func TestStoreRegistry_CreateUnknownType(t *testing.T) {
 
 func TestStoreRegistry_FactoryErrorPropagates(t *testing.T) {
 	reg := NewStoreRegistry()
-	reg.Register("broken", func(cfg StoreConfig) (ports.Store, error) {
+	reg.Register("broken", func(cfg config.StoreConfig) (ports.Store, error) {
 		return nil, errors.New("factory boom")
 	})
 
-	_, err := reg.Create("broken", StoreConfig{})
+	_, err := reg.Create("broken", config.StoreConfig{})
 	if err == nil || err.Error() != "factory boom" {
 		t.Fatalf("expected factory error to propagate, got %v", err)
 	}

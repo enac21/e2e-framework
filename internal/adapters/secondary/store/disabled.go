@@ -6,9 +6,6 @@ import (
 	"e2e-framework/internal/core/domain"
 )
 
-// NoopStore implements ports.Store as a no-op, used to fully disable the
-// database. Claim always returns nil so request receivers poll until their
-// timeout, which is the expected behaviour for DB-less runs.
 type NoopStore struct{}
 
 func NewNoopStore() *NoopStore {

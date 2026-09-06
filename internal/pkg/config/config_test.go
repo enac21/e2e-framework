@@ -102,15 +102,15 @@ store:
   redis:
     url: "redis://localhost:6379"
 `)
-	t.Setenv("STORE_TYPE", "none")
+	t.Setenv("STORE_TYPE", "disabled")
 
 	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
 
-	if cfg.Store.Type != "none" {
-		t.Errorf("expected STORE_TYPE override to none, got %q", cfg.Store.Type)
+	if cfg.Store.Type != "disabled" {
+		t.Errorf("expected STORE_TYPE override to disabled, got %q", cfg.Store.Type)
 	}
 }
 

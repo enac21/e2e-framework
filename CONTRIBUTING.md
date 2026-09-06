@@ -119,16 +119,15 @@ deleting it; `Reserve` fails if the channel/recipient is already reserved.
 
 ### Step 3 — Add its config (if needed)
 
-If the backend needs configuration, add fields to `store.StoreConfig` in
-`registry.go`, the matching `config.StoreConfig` section in
-`internal/pkg/config/config.go`, and mirror it in `configs/config.example.yaml`.
+If the backend needs configuration, add fields to the matching `config.StoreConfig`
+section in `internal/pkg/config/config.go`, and mirror it in `configs/config.example.yaml`.
 
 ### Step 4 — Register in `main.go`
 
 Add one line to `cmd/server/main.go`:
 
 ```go
-storeReg.Register("mongo", func(cfg store.StoreConfig) (ports.Store, error) {
+storeReg.Register("mongo", func(cfg config.StoreConfig) (ports.Store, error) {
     return store.NewMongoStore(cfg.Mongo)
 })
 ```

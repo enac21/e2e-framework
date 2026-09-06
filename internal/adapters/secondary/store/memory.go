@@ -8,11 +8,8 @@ import (
 	"time"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/config"
 )
-
-type MemoryStoreConfig struct {
-	TTL time.Duration
-}
 
 type memEntry struct {
 	payload   []byte
@@ -24,9 +21,6 @@ type memReservation struct {
 	expiresAt time.Time
 }
 
-// MemoryStore implements ports.Store using in-process, mutex-protected maps.
-// It is intended for single-process environments and tests that must not
-// depend on an external database.
 type MemoryStore struct {
 	mu           sync.Mutex
 	messages     map[string]memEntry
@@ -34,7 +28,7 @@ type MemoryStore struct {
 	ttl          time.Duration
 }
 
-func NewMemoryStore(cfg MemoryStoreConfig) *MemoryStore {
+func NewMemoryStore(cfg config.MemoryStoreConfig) *MemoryStore {
 	return &MemoryStore{
 		messages:     make(map[string]memEntry),
 		reservations: make(map[string]memReservation),
