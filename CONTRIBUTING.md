@@ -89,6 +89,56 @@ by their registered type string.
 
 ---
 
+## Adding a New Store Backend
+
+The message store is pluggable behind the `ports.Store` contract
+(`internal/core/ports/store.go`). Adding a new backend is a **small,
+non-invasive** change: a new file plus one `Register` line in
+`cmd/server/main.go` — no existing code is touched.
+
+### Step 1 — Create the implementation file
+
+Add a new file in `internal/adapters/secondary/store/`:
+
+```
+internal/adapters/secondary/store/{backend}.go
+```
+
+For example, for a fictional `mongo` backend:
+
+```
+internal/adapters/secondary/store/mongo.go
+```
+
+### Step 2 — Implement the `ports.Store` interface
+
+All seven methods: `Deposit`, `Claim`, `Reserve`, `Release`, `Delete` and
+`Close` (plus a constructor). Reproduce the exact observable semantics of the
+Redis backend: `Claim` returns `(nil, nil)` on a missing/expired key without
+deleting it; `Reserve` fails if the channel/recipient is already reserved.
+
+### Step 3 — Add its config (if needed)
+
+If the backend needs configuration, add fields to `store.StoreConfig` in
+`registry.go`, the matching `config.StoreConfig` section in
+`internal/pkg/config/config.go`, and mirror it in `configs/config.example.yaml`.
+
+### Step 4 — Register in `main.go`
+
+Add one line to `cmd/server/main.go`:
+
+```go
+storeReg.Register("mongo", func(cfg store.StoreConfig) (ports.Store, error) {
+    return store.NewMongoStore(cfg.Mongo)
+})
+```
+
+### Step 5 — Use it
+
+Set `store.type: mongo` (or `STORE_TYPE=mongo`) in `configs/config.yaml`.
+
+---
+
 ## Code Style
 
 - All files must have a `package` declaration and a comment explaining their responsibility.

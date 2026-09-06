@@ -55,17 +55,41 @@ func main() {
 
 	log.Printf("Loaded %d test definitions", len(tests))
 
-	redisStore, err := store.NewRedisStore(store.RedisStoreConfig{
-		URL:         cfg.Store.Redis.URL,
-		Username:    cfg.Store.Redis.Username,
-		Password:    cfg.Store.Redis.Password,
-		ClusterMode: cfg.Store.Redis.ClusterMode,
-		TTL:         cfg.Store.Redis.TTL,
+	storeReg := store.NewStoreRegistry()
+	storeReg.Register("redis", func(cfg store.StoreConfig) (ports.Store, error) {
+		return store.NewRedisStore(cfg.Redis)
+	})
+	storeReg.Register("postgres", func(cfg store.StoreConfig) (ports.Store, error) {
+		return store.NewPostgresStore(cfg.Postgres)
+	})
+	storeReg.Register("memory", func(cfg store.StoreConfig) (ports.Store, error) {
+		return store.NewMemoryStore(cfg.Memory), nil
+	})
+	storeReg.Register("none", func(cfg store.StoreConfig) (ports.Store, error) {
+		return store.NewNoopStore(), nil
+	})
+
+	s, err := storeReg.Create(cfg.Store.Type, store.StoreConfig{
+		Type: cfg.Store.Type,
+		Redis: store.RedisStoreConfig{
+			URL:         cfg.Store.Redis.URL,
+			Username:    cfg.Store.Redis.Username,
+			Password:    cfg.Store.Redis.Password,
+			ClusterMode: cfg.Store.Redis.ClusterMode,
+			TTL:         cfg.Store.Redis.TTL,
+		},
+		Postgres: store.PostgresStoreConfig{
+			DSN: cfg.Store.Postgres.DSN,
+			TTL: cfg.Store.Postgres.TTL,
+		},
+		Memory: store.MemoryStoreConfig{
+			TTL: cfg.Store.Memory.TTL,
+		},
 	})
 	if err != nil {
-		log.Fatalf("failed to connect to store: %v", err)
+		log.Fatalf("failed to create store: %v", err)
 	}
-	defer redisStore.Close()
+	defer s.Close()
 
 	triggerAssertionReg := triggerasserts.NewTriggerAssertionRegistry()
 	triggerAssertionReg.Register("equals", triggerasserts.NewEqualsAssertion)
@@ -100,7 +124,7 @@ func main() {
 	receiverReg.Register(
 		domain.RequestReceiverType,
 		func(options map[string]string) (ports.Receiver, error) {
-			return request.NewRequestReceiver(redisStore), nil
+			return request.NewRequestReceiver(s), nil
 		},
 	)
 	receiverReg.Register(
@@ -113,7 +137,7 @@ func main() {
 	// Core Orchestrator
 	orchestrator := services.NewOrchestrator(
 		triggerReg,
-		redisStore,
+		s,
 		receiverReg,
 		assertionReg,
 		httpNotifier,
@@ -126,7 +150,7 @@ func main() {
 		JWTSecret:  cfg.Auth.JWTSecret,
 	}, orchestrator, tests)
 
-	whServer := webhook.NewServer(redisStore)
+	whServer := webhook.NewServer(s)
 	whServer.RegisterExtractor("twilio", webhook.NewTwilioExtractor())
 	whServer.RegisterExtractor("meta", webhook.NewMetaExtractor())
 	whServer.RegisterRoutes(apiServer.Mux())
