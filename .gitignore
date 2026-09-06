@@ -5,6 +5,9 @@
 *.so
 *.dylib
 
+# Plansc
+docs/plan_*.md
+
 # Test binary, built with `go test -c`
 *.test
 tests/notifications_create_test.yaml

@@ -20,7 +20,7 @@ func NewRequestReceiver(store ports.Store) *RequestReceiver {
 	}
 }
 
-func (r *RequestReceiver) Start(ctx context.Context, runID string) error {
+func (r *RequestReceiver) Start(ctx context.Context, runID string, vars map[string]string) error {
 	r.runID = runID
 
 	return nil

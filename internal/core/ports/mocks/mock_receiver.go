@@ -57,17 +57,17 @@ func (mr *MockReceiverMockRecorder) Collect(ctx any) *gomock.Call {
 }
 
 // Start mocks base method.
-func (m *MockReceiver) Start(ctx context.Context, runID string) error {
+func (m *MockReceiver) Start(ctx context.Context, runID string, vars map[string]string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Start", ctx, runID)
+	ret := m.ctrl.Call(m, "Start", ctx, runID, vars)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Start indicates an expected call of Start.
-func (mr *MockReceiverMockRecorder) Start(ctx, runID any) *gomock.Call {
+func (mr *MockReceiverMockRecorder) Start(ctx, runID, vars any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockReceiver)(nil).Start), ctx, runID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockReceiver)(nil).Start), ctx, runID, vars)
 }
 
 // Stop mocks base method.

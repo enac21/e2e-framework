@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/adapters/secondary/notifier"
 	"e2e-framework/internal/adapters/secondary/receiver"
+	receiverapi "e2e-framework/internal/adapters/secondary/receiver/api"
 	"e2e-framework/internal/adapters/secondary/receiver/imap"
 	"e2e-framework/internal/adapters/secondary/receiver/request"
 	"e2e-framework/internal/adapters/secondary/store"
@@ -55,17 +57,25 @@ func main() {
 
 	log.Printf("Loaded %d test definitions", len(tests))
 
-	redisStore, err := store.NewRedisStore(store.RedisStoreConfig{
-		URL:         cfg.Store.Redis.URL,
-		Username:    cfg.Store.Redis.Username,
-		Password:    cfg.Store.Redis.Password,
-		ClusterMode: cfg.Store.Redis.ClusterMode,
-		TTL:         cfg.Store.Redis.TTL,
+	storeReg := store.NewStoreRegistry()
+	storeReg.Register("redis", func(cfg config.StoreConfig) (ports.Store, error) {
+		return store.NewRedisStore(cfg.Redis)
 	})
+	storeReg.Register("postgres", func(cfg config.StoreConfig) (ports.Store, error) {
+		return store.NewPostgresStore(cfg.Postgres)
+	})
+	storeReg.Register("memory", func(cfg config.StoreConfig) (ports.Store, error) {
+		return store.NewMemoryStore(cfg.Memory), nil
+	})
+	storeReg.Register("disabled", func(cfg config.StoreConfig) (ports.Store, error) {
+		return store.NewDisabledStore(), nil
+	})
+
+	s, err := storeReg.Create(cfg.Store)
 	if err != nil {
-		log.Fatalf("failed to connect to store: %v", err)
+		log.Fatalf("failed to create store: %v", err)
 	}
-	defer redisStore.Close()
+	defer s.Close()
 
 	triggerAssertionReg := triggerasserts.NewTriggerAssertionRegistry()
 	triggerAssertionReg.Register("equals", triggerasserts.NewEqualsAssertion)
@@ -99,34 +109,47 @@ func main() {
 	receiverReg := receiver.NewReceiverRegistry()
 	receiverReg.Register(
 		domain.RequestReceiverType,
-		func(options map[string]string) (ports.Receiver, error) {
-			return request.NewRequestReceiver(redisStore), nil
+		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
+			return request.NewRequestReceiver(s), nil
 		},
 	)
 	receiverReg.Register(
 		domain.ImapReceiverType,
-		func(options map[string]string) (ports.Receiver, error) {
-			return imap.NewIMAPReceiver(options)
+		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
+			return imap.NewIMAPReceiver(cfg.Options)
+		},
+	)
+	receiverReg.Register(
+		domain.APIReceiverType,
+		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
+			return receiverapi.NewAPIPollingReceiver(cfg, triggerAssertionReg, &http.Client{})
 		},
 	)
 
 	// Core Orchestrator
 	orchestrator := services.NewOrchestrator(
 		triggerReg,
-		redisStore,
+		s,
 		receiverReg,
 		assertionReg,
 		httpNotifier,
 	)
 
 	// Setup primary adapters
+	if err := config.ValidateTestGroups(cfg.TestGroups, tests); err != nil {
+		log.Fatalf("invalid test groups config: %v", err)
+	}
+
+	groupResolver := services.NewGroupResolver(cfg.TestGroups)
+
 	apiServer := api.NewServer(&api.Config{
 		Port:       cfg.Server.Port,
 		AuthEnable: cfg.Auth.Enabled,
 		JWTSecret:  cfg.Auth.JWTSecret,
+		Resolver:   groupResolver,
 	}, orchestrator, tests)
 
-	whServer := webhook.NewServer(redisStore)
+	whServer := webhook.NewServer(s)
 	whServer.RegisterExtractor("twilio", webhook.NewTwilioExtractor())
 	whServer.RegisterExtractor("meta", webhook.NewMetaExtractor())
 	whServer.RegisterRoutes(apiServer.Mux())

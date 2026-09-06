@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/mock/gomock"
 
@@ -19,12 +20,14 @@ import (
 	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/ports/mocks"
 	"e2e-framework/internal/core/services"
+	"e2e-framework/internal/pkg/config"
 )
 
 func newTestServer(
 	t *testing.T,
 	ctrl *gomock.Controller,
 	tests map[string]domain.TestDefinition,
+	groups ...map[string]config.TestGroupConfig,
 ) (*api.Server, *mocks.MockTrigger, *mocks.MockNotifier) {
 	t.Helper()
 
@@ -45,7 +48,12 @@ func newTestServer(
 		mockNotifier,
 	)
 
-	srv := api.NewServer(&api.Config{AuthEnable: false}, orch, tests)
+	var resolver ports.GroupResolver
+	if len(groups) > 0 {
+		resolver = services.NewGroupResolver(groups[0])
+	}
+
+	srv := api.NewServer(&api.Config{AuthEnable: false, Resolver: resolver}, orch, tests)
 
 	return srv, mockTrigger, mockNotifier
 }
@@ -53,6 +61,15 @@ func newTestServer(
 func postSequence(srv *api.Server, target string, rules []string) *httptest.ResponseRecorder {
 	body, _ := json.Marshal(rules)
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Mux().ServeHTTP(w, req)
+
+	return w
+}
+
+func postBody(srv *api.Server, target string, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.Mux().ServeHTTP(w, req)
@@ -301,6 +318,106 @@ func TestHandleRunSequence_SkipFailTest_False_ReturnsAllResults(t *testing.T) {
 
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results (continues after failure), got %d", len(results))
+	}
+
+	<-notified
+}
+
+func TestHandleRunSequence_TestGroup_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	tests := map[string]domain.TestDefinition{
+		"a": {ID: "a", Enabled: true},
+		"b": {ID: "b", Enabled: true},
+	}
+	groups := map[string]config.TestGroupConfig{
+		"ci": {Tests: []string{"a", "b"}, TestDelay: 2 * time.Second, SkipFailTest: true},
+	}
+	srv, _, _ := newTestServer(t, ctrl, tests, groups)
+	w := postBody(srv, "/run-sequence?test_group=ci", "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var results []*domain.TestResult
+	if err := json.NewDecoder(w.Body).Decode(&results); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+}
+
+func TestHandleRunSequence_TestGroup_NotFound(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	srv, _, _ := newTestServer(t, ctrl, map[string]domain.TestDefinition{})
+	w := postBody(srv, "/run-sequence?test_group=nope", "")
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleRunSequence_TestGroupAndBodyList_MutuallyExclusive(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	tests := map[string]domain.TestDefinition{
+		"a": {ID: "a", Enabled: true},
+	}
+	groups := map[string]config.TestGroupConfig{
+		"ci": {Tests: []string{"a"}},
+	}
+	srv, _, _ := newTestServer(t, ctrl, tests, groups)
+	w := postBody(srv, "/run-sequence?test_group=ci", `["a"]`)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleRunSequence_TestGroup_QueryOverridesGroupDefaults(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	failTrigger := domain.TriggerConfig{Method: "POST", URL: "http://x"}
+	tests := map[string]domain.TestDefinition{
+		"fail": {ID: "fail", Enabled: true, Triggers: []domain.TriggerConfig{failTrigger}},
+		"ok":   {ID: "ok", Enabled: true},
+	}
+	groups := map[string]config.TestGroupConfig{
+		"ci": {Tests: []string{"fail", "ok"}, SkipFailTest: true},
+	}
+	srv, mockTrigger, mockNotifier := newTestServer(t, ctrl, tests, groups)
+
+	notified := make(chan struct{})
+
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), failTrigger, gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("trigger error"))
+	mockNotifier.EXPECT().
+		Notify(gomock.Any(), gomock.Any(), gomock.Any()).
+		Do(func(context.Context, domain.OnFailureConfig, *domain.TestResult) { close(notified) }).
+		Return(nil)
+
+	w := postBody(srv, "/run-sequence?test_group=ci&skip_fail_test=false", "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var results []*domain.TestResult
+	if err := json.NewDecoder(w.Body).Decode(&results); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (query param overrode group default), got %d", len(results))
 	}
 
 	<-notified

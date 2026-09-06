@@ -5,6 +5,49 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-09-07] — API receiver (`type: api`): outbound HTTP polling
+
+- **New receiver type** `api` (`internal/adapters/secondary/receiver/api/receiver.go`): implements a **trigger that polls** — executes an outbound HTTP request every `interval` until `expected_status` + trigger-style `response_assertions` pass, or until the receiver `timeout` expires (`domain.ErrTimeout`). Failures are transient; only the timeout fails the run. On success it returns the response as a `domain.Message` (`Headers`, `Fields` flattened from the JSON body, `Raw`), so message-style `assertions` keep working.
+- **`ReceiverConfig`** (`domain/test.go`) gained trigger-like fields: `interval`, `method`, `url`, `headers`, `body`, `expected_status`, `response_assertions` and `extract`. `method`/`url`/`headers`/`body` support `{{variable}}` substitution with the run variables.
+- **`ports.Receiver` interface change**: `Start(ctx, runID)` → `Start(ctx, runID, vars map[string]string)`. The orchestrator now passes the resolved `triggerVars` (run_id + `variables:` block + prior triggers' `extract`) at `startReceivers`, so receivers can render templates. `request` and `imap` receivers updated (imap stores the vars).
+- **`ReceiverFactory` signature change** (`registry.go`): the factory now receives the full `domain.ReceiverConfig` instead of `options map[string]string` — required so structured receiver fields (body map, `response_assertions` list) reach the constructor, mirroring how `TriggerConfig` flows into triggers. Existing receivers read `cfg.Options` unchanged.
+- **Wiring** (`cmd/server/main.go`): `receiverReg.Register(domain.APIReceiverType, ...)` builds the receiver with the trigger assertion registry + an `*http.Client`.
+- **`//go:generate` directives** added to the 7 ports with committed mocks (`mockgen` via `go run -mod=mod go.uber.org/mock/mockgen`), so `make mocks` actually regenerates. `mock_receiver.go` regenerated for the new `Start` signature.
+- **Tests**: `receiver/api/receiver_test.go` (missing url → `ErrConfiguration`; first-poll success; retry on status mismatch then success; retry on `response_assertions` failure → `ErrTimeout`; `{{var}}` substitution in url/headers/body; not-started guard; message fields for message-style assertions) and an orchestrator test proving `triggerVars` reach `Start`. IMAP receiver tests updated for the new signature.
+- **Docs**: README "API Receiver (`type: api`)" section (both flows table + full YAML reference), `CONTRIBUTING.md` updated interface/registration examples, and `tests/example_api_polling.yaml`.
+
+---
+
+## [2026-09-06] — Named test groups (`test_group`) for `/run-sequence`
+
+- **New config block** (`configs/config.yaml`): `test_groups` maps a name to a `TestGroupConfig` (`description`, ordered `tests` list, optional `test_delay` and `skip_fail_test` defaults). Parsed by `internal/pkg/config/config.go`.
+- **Validation at startup** (`config.ValidateTestGroups`, called from `main.go`): every group must have at least one test, and every referenced test id must resolve to a loaded `TestDefinition` — otherwise the service fails fast to avoid silent pipeline gaps.
+- **`ports.GroupResolver`** (`internal/core/ports/group_resolver.go`) + `services.GroupResolver` implementation (`group_resolver.go`): keeps the API adapter decoupled from config internals (Option B). Injected into `api.NewServer` via `api.Config.Resolver`.
+- **`POST /run-sequence` body + query API** (`internal/adapters/primary/api/server.go`):
+  1. Body: plain JSON array of test IDs `["a","b"]`.
+  2. `test_group` query param (`?test_group=ci`) — expands the configured group; unknown group → `404`.
+  - `test_group` + a non-empty body list together → `400`; empty list → `400`.
+  - `test_delay`/`skip_fail_test` precedence: explicit query params always win → else group defaults → else built-in defaults.
+- **Swagger regenerated** (`swag init`) for the current `/run-sequence` params (body `[]string` + `test_group` query param).
+- **Tests**: API handler group tests (group via query param, unknown group 404, mutual exclusion 400, query-overrides-group-defaults), and config tests (group parsing + `ValidateTestGroups` empty/unknown cases).
+- **Docs**: README "Run a test group" section (array body + `test_group` query param + CI/CD story + `test_groups` reference) and `configs/config.example.yaml` example.
+
+---
+
+## [2026-09-06] — Pluggable store backends (Redis / PostgreSQL / In-Memory / disabled)
+
+- **`StoreRegistry` factory** (`internal/adapters/secondary/store/registry.go`): mirrors the trigger registry — `NewStoreRegistry`, `Register(type, factory)`, `Create(type, cfg)` with `domain.ErrConfiguration` for unknown types. Adding a backend is now a new file + one `Register` line in `main.go` (Open/Closed).
+- **New backends** behind the same `ports.Store` contract:
+  - **PostgreSQL** (`store/postgres.go`, new dependency `github.com/jackc/pgx/v5`): schema (`e2e_messages`, `e2e_reservations`) created idempotently on startup; idempotent `Deposit` (ON CONFLICT), non-deleting `Claim`, NX `Reserve`, `Release`/`Delete`, plus opportunistic purge of expired rows. Guarded by `//go:build integration`.
+  - **In-memory** (`store/memory.go`): single-process, mutex-protected maps reproducing the Redis semantics (deposit/claim, TTL expiry, reservation NX conflict + TTL, release/delete).
+  - **disabled** (`store/disabled.go`): `DisabledStore` fully disables the DB; `Claim` returns `(nil, nil)` so `request` receivers poll until their timeout — expected behaviour for DB-less runs.
+- **Config** (`config.go`): `store.type` (`redis`/`postgres`/`memory`/`disabled`, default `redis`), new `store.postgres` and `store.memory` sections, and a `STORE_TYPE` env override. Empty `store.type` defaults to redis (backward compatible). No connection is attempted when `type` is `disabled`.
+- **Wiring** (`cmd/server/main.go`): the store is built via the registry from `cfg.Store.Type`; the resulting `ports.Store` flows unchanged into the webhook server, `request` receiver and orchestrator.
+- **Tests**: `store/registry_test.go` (register/create, unknown type, error propagation), `store/memory_test.go` (semantic parity with Redis), `store/disabled_test.go` (all no-ops), `store/postgres_test.go` (integration), and `config_test.go` (store defaults + full parse + `STORE_TYPE` override).
+- **Docs**: README "Store backends" section + env var table (`POSTGRES_DSN`, `STORE_TYPE`), `CONTRIBUTING.md` "Adding a new store backend" guide, `configs/config.example.yaml`, and an optional `postgres` service in `docker-compose.yml`.
+
+---
+
 ## [2026-08-31] — Trigger registry (`type`/`options` per step)
 
 - **New `TriggerRegistry`** (`internal/adapters/secondary/trigger/registry.go`): factory pattern mirroring `receiver.ReceiverRegistry` — `NewTriggerRegistry`, `Register(typeName, factory)`, `Create(typeName, options)` with `domain.ErrConfiguration` for unknown types.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/services"
 
 	_ "e2e-framework/docs"
@@ -39,6 +41,7 @@ type Config struct {
 	Port       int
 	AuthEnable bool
 	JWTSecret  string
+	Resolver   ports.GroupResolver
 }
 
 func (s *Server) Mux() *http.ServeMux {
@@ -252,17 +255,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 // handleRunSequence godoc
 // @Summary Run a sequence of tests
-// @Description Execute an ordered list of test IDs sequentially. Each test completes before the next starts.
+// @Description Execute an ordered list of test IDs sequentially, or run a configured test group. The body is a plain JSON array of test IDs; alternatively pass test_group as a query param to expand a configured group.
 // @Tags Tests
 // @Accept json
 // @Produce json
-// @Param rules body []string true "Ordered list of test IDs to execute"
+// @Param test_group query string false "Name of a configured test group to run instead of an explicit list"
+// @Param body body []string false "Ordered list of test IDs (not used when test_group is set)"
 // @Param test_delay query string false "Duration to wait between tests (e.g. '2s'). Not applied before the first test."
 // @Param skip_fail_test query bool false "Stop the sequence after the first failed or errored test (default false)"
 // @Success 200 {array} domain.TestResult
 // @Failure 400 {string} string "Invalid body or parameters"
 // @Failure 401 {string} string "Unauthorized"
-// @Failure 404 {string} string "Test ID not found"
+// @Failure 404 {string} string "Test ID or test group not found"
 // @Failure 405 {string} string "Method not allowed"
 // @Router /run-sequence [post]
 func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
@@ -272,11 +276,46 @@ func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var rules []string
-	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
+	rules := make([]string, 0)
+	var group *ports.TestGroup
+
+	if groupName := r.URL.Query().Get("test_group"); groupName != "" {
+		if s.cfg.Resolver == nil {
+			http.Error(w, fmt.Sprintf("test group %q not found", groupName), http.StatusNotFound)
+
+			return
+		}
+
+		resolved, ok := s.cfg.Resolver.Resolve(groupName)
+		if !ok {
+			http.Error(w, fmt.Sprintf("test group %q not found", groupName), http.StatusNotFound)
+
+			return
+		}
+
+		group = &resolved
+		rules = resolved.Tests
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 
 		return
+	}
+
+	if trimmed := strings.TrimSpace(string(body)); trimmed != "" {
+		if group != nil {
+			http.Error(w, "test_group and body test list are mutually exclusive", http.StatusBadRequest)
+
+			return
+		}
+
+		if err := json.Unmarshal([]byte(trimmed), &rules); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+
+			return
+		}
 	}
 
 	if len(rules) == 0 {
@@ -286,19 +325,37 @@ func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var delay time.Duration
+	delaySet := false
 
 	if raw := r.URL.Query().Get("test_delay"); raw != "" {
-		var err error
-
-		delay, err = time.ParseDuration(raw)
+		parsed, err := time.ParseDuration(raw)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("invalid test_delay: %v", err), http.StatusBadRequest)
 
 			return
 		}
+
+		delay = parsed
+		delaySet = true
 	}
 
-	skipFailTest := r.URL.Query().Get("skip_fail_test") == "true"
+	var skipFailTest bool
+	skipSet := false
+
+	if raw := r.URL.Query().Get("skip_fail_test"); raw != "" {
+		skipFailTest = raw == "true"
+		skipSet = true
+	}
+
+	if group != nil {
+		if !delaySet {
+			delay = group.TestDelay
+		}
+
+		if !skipSet {
+			skipFailTest = group.SkipFailTest
+		}
+	}
 
 	defs := make([]domain.TestDefinition, 0, len(rules))
 

@@ -1,0 +1,56 @@
+# Example test: the `type: api` receiver (outbound HTTP polling).
+#
+# Unlike `type: request` (webhook/home-delivered messages), the `api` receiver
+# actively polls an HTTP endpoint every `interval` until the status code AND
+# `response_assertions` pass, or until `timeout` expires. Failures are
+# transient: only the timeout fails the run.
+#
+# This test is a demo — point `url` at a JSON API that eventually returns
+# `{"status":"paid"}` before enabling it.
+version: "1"
+id: example_api_polling
+description: "Polls an orders API until the order is paid (or the budget expires)."
+enabled: false # Demo only: point the URL at a real API before enabling
+
+variables:
+  base_url: "{{env.BASE_URL}}"
+  order_id: "{{uuid()}}"
+
+triggers:
+  # Step 1: create the order; capture its id.
+  - method: POST
+    url: "{{base_url}}/orders"
+    timeout: 10s
+    body:
+      item: "widget"
+    response_assertions:
+      - type: present
+        field: id
+    extract:
+      order_id: "id"
+
+  # Step 2: poll the order until it is paid (or the 60s budget expires).
+  - method: GET
+    url: "{{base_url}}/orders/{{order_id}}"
+    receivers:
+      - type: api
+        interval: 5s   # polling cadence (default 5s)
+        timeout: 60s   # overall polling budget
+        headers:
+          Authorization: "Bearer {{env.API_TOKEN}}"
+        expected_status: 200
+        response_assertions:
+          - type: equals
+            field: status
+            value: "paid"
+        # Accepted by the schema but not merged back into run variables yet
+        # (separate planned feature).
+        extract:
+          payment_id: "data.payment_id"
+        # Optional message-style assertions (run by the orchestrator against
+        # the flattened response body once the polling predicate passes).
+        assertions:
+          - type: contains
+            field: body
+            value: "paid"
+    wait_for_receivers: true

@@ -182,9 +182,54 @@ make docker-down
 |--------|------|------|-------------|
 | `GET`  | `/health` | No | Liveness check |
 | `POST` | `/run?id={test_id}` | Yes | Trigger a specific test |
+| `POST` | `/run-sequence` | Yes | Run an ordered sequence of tests (see [Run a test group](#run-a-test-group)) |
 | `GET`  | `/results` | Yes | All stored test results (last 100) |
 | `GET`  | `/results/{run_id}` | Yes | Result for a specific run (poll for async) |
 | `GET`  | `/swagger/` | Yes | Interactive API docs (Swagger UI) |
+
+### Run a test group
+
+`POST /run-sequence` runs tests in order. The **body is a plain JSON array of
+test IDs**; alternatively, a `test_group` query param runs a named,
+pre-configured group:
+
+```bash
+# Explicit list of test IDs
+curl -X POST http://localhost:8082/run-sequence \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '["crear_y_verificar_producto","local_loop_test"]'
+
+# Named, pre-configured group (test_group as query param)
+curl -X POST "http://localhost:8082/run-sequence?test_group=ci" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**CI/CD story:** a group lets you change *which* tests a pipeline runs by
+editing `configs/config.yaml` only — the script/call that hits the endpoint
+never changes:
+
+```yaml
+test_groups:
+  ci:
+    description: "Pipeline that runs after every merge"
+    tests:
+      - crear_y_verificar_producto
+      - local_loop_test
+    test_delay: 2s
+    skip_fail_test: true
+```
+
+- `tests` — the ordered list of test IDs to run.
+- `test_delay` / `skip_fail_test` — optional per-group defaults for the
+  `test_delay` and `skip_fail_test` query params.
+- `test_group` and a body test list are **mutually exclusive** (400 if both
+  are sent).
+- An unknown `test_group` returns `404`; an empty list returns `400`.
+
+**Precedence:** explicit query params (`test_delay`, `skip_fail_test`) always
+win; otherwise the group's defaults apply; otherwise the built-in defaults
+(`0`, `false`).
 
 ### Authentication
 
@@ -797,6 +842,78 @@ receivers:
 
 For webhook-based receivers (e.g., `request`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
 
+### API Receiver (`type: api`)
+
+There are **two** "API receiver" flows:
+
+| Flow | Type | Semantics |
+|------|------|-----------|
+| **Webhook / home-delivered** | `request` (existing) | A provider pushes a message to the webhook server; the receiver polls the store until it arrives or times out. |
+| **Outbound polling** | `api` (new) | The receiver **makes the HTTP call itself**, repeatedly, until the response satisfies the predicate or the budget (`timeout`) expires. |
+
+The `type: api` receiver behaves like a **trigger that polls**: every `interval`
+it executes an HTTP request and succeeds when `expected_status` and the
+trigger-style `response_assertions` both pass. Failures are **transient** — only
+the `timeout` fails the run, so it composes naturally on an eventual-consistency
+verification step.
+
+```yaml
+triggers:
+  - method: POST
+    url: "{{env.orders_api}}/checkout"
+    body:
+      order_id: "{{order_id}}"
+    receivers:
+      - type: api
+        interval: 5s          # polling cadence (default 5s)
+        timeout: 60s          # overall polling budget
+        # trigger-like fields:
+        method: GET
+        url: "{{env.orders_api}}/orders/{{order_id}}"
+        headers:
+          Authorization: "Bearer {{env.API_TOKEN}}"
+        expected_status: 200
+        response_assertions:
+          - type: equals
+            field: data.status
+            value: "paid"
+        extract:
+          payment_id: "data.payment_id"
+        # optional message-style assertions on the flattened response
+        assertions:
+          - type: contains
+            field: body
+            value: "paid"
+    wait_for_receivers: true
+```
+
+**Fields:**
+
+- `interval` — how often to poll (Go duration, e.g. `5s`). Default `5s`.
+- `timeout` — overall budget for polling; after it, the receiver returns
+  `ErrTimeout` and the test fails. Required unless you want the run's own
+  deadline to govern.
+- `method` (default `GET`), `url` (required), `headers`, `body` — the polled
+  request. `body` is serialized as JSON unless `Content-Type:
+  application/x-www-form-urlencoded` is set (same rules as triggers).
+- `expected_status` — when set (> 0), the attempt passes **only** if the status
+  matches exactly; when unset, any 2xx/3xx passes and 4xx/5xx is a transient
+  failure.
+- `response_assertions` — the trigger assertion types (`equals`, `contains`,
+  `present`, `array_contains`, `int_gt`, …) evaluated against the flattened
+  JSON body of **each** poll. Values support `{{variable}}` substitution.
+- `{{variable}}` substitution works in `url`, `headers`, `body` and assertion
+  values — the receiver receives the full run variables (from `variables:`,
+  prior triggers' `extract`, and `run_id`).
+- `extract` — accepted by the schema but **not** yet merged back into run
+  variables (planned separately).
+- `assertions` — message-style assertions run by the orchestrator **after** the
+  polling predicate passes, against the flattened response body.
+
+On success the receiver returns the response as a `domain.Message` (`Headers`,
+`Fields` flattened from the JSON body, `Raw` body), so message-style `assertions`
+keep working as with any other receiver.
+
 ### Retry Logic
 
 By default, a test runs once and is marked as failed if any receiver times out or any assertion does not pass. For flaky or eventually-consistent systems, you can configure automatic retries using the `retry` block:
@@ -849,9 +966,15 @@ webhook:
   port: 8081           # Webhook ingestion server port (Twilio, Meta, etc.)
 
 store:
+  type: redis          # redis | postgres | memory | disabled   (default: redis)
   redis:
     url: "{{env.REDIS_URL}}" //TODO - Cluster mode & credentials
     ttl: 300s          # How long received messages are kept
+  postgres:
+    dsn: "{{env.POSTGRES_DSN}}"
+    ttl: 300s
+  memory:
+    ttl: 300s
 
 scheduler:
   enabled: true
@@ -859,6 +982,15 @@ scheduler:
 
 tests:
   path: "./tests"      # Directory containing YAML test definitions
+
+test_groups:
+  ci:
+    description: "Pipeline that runs after every merge"
+    tests:
+      - local_loop_test
+      - example_variables
+    test_delay: 2s
+    skip_fail_test: true
 
 receivers:
   sms:
@@ -875,11 +1007,35 @@ logging:
   format: json          # json (production) | text (local)
 ```
 
+### Store backends
+
+The message store used to buffer received messages between the webhook
+ingestion and the `request` receiver is pluggable. Select the backend with the
+`store.type` key (`redis` | `postgres` | `memory` | `disabled`, default `redis`).
+
+| Backend | Purpose |
+|---------|---------|
+| `redis` | **Default.** Distributed, supports cluster mode. Requires `REDIS_URL`. |
+| `postgres` | Distributed, relational. Requires `POSTGRES_DSN` (pgx/v5). Schema is created automatically on startup. |
+| `memory` | Single-process, in-memory, mutex-protected. No external dependency. Great for local dev and CI. |
+| `disabled` | Fully disables the database (no-op store). `request` receivers poll until their timeout. |
+
+Only the section matching the selected backend is read; the others are ignored.
+`store.type` may be omitted — it defaults to `redis`, so existing config files
+keep working unchanged.
+
+> **Running without a DB:** set `store.type: disabled` (or `STORE_TYPE=disabled`). The
+> service starts with **no** database dependency. Any test that uses a
+> `request` (webhook) receiver will time out waiting for a message, which is
+> expected for DB-less runs — use this for pure HTTP-trigger tests.
+
 ### Environment variables
 
 | Variable | Required | Used in | Description |
 |----------|----------|---------|-------------|
-| `REDIS_URL` | Yes | `config.yaml` | Redis connection URL (e.g. `redis://localhost:6379`) |
+| `REDIS_URL` | Yes (if `store.type: redis`) | `config.yaml` | Redis connection URL (e.g. `redis://localhost:6379`) |
+| `POSTGRES_DSN` | Yes (if `store.type: postgres`) | `config.yaml` | PostgreSQL connection DSN (pgx/v5 format) |
+| `STORE_TYPE` | No | `config.yaml` | Overrides `store.type` (`redis`/`postgres`/`memory`/`disabled`) |
 | `JWT_SECRET` | Yes | `config.yaml` | Shared secret for JWT signing/validation |
 | `WEBHOOK_BASE_URL` | No | `config.yaml` | Base URL for webhook receiver callbacks |
 | `IMAP_HOST` | No | Test YAMLs | IMAP server hostname for email tests |

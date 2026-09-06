@@ -13,12 +13,18 @@ auth:
   jwt_secret: "{{env.JWT_SECRET}}"
 
 store:
+  type: redis        # redis | postgres | memory | disabled   (default: redis)
   redis:
     url: "{{env.REDIS_URL}}"
     ttl: 300s
     username: "{{env.REDIS_USERNAME}}"
     password: "{{env.REDIS_PASSWORD}}"
     cluster_mode: false
+  postgres:
+    dsn: "{{env.POSTGRES_DSN}}"
+    ttl: 300s
+  memory:
+    ttl: 300s
 
 scheduler:
   enabled: true
@@ -26,6 +32,18 @@ scheduler:
 
 tests:
   path: "tests"
+
+test_groups:
+  ci:
+    description: "Pipeline that runs after every merge"
+    tests:
+      - local_loop_test
+      - example_variables
+    test_delay: 2s
+    skip_fail_test: true
+  smoke:
+    tests:
+      - local_loop_test
 
 receivers:
   sms:
