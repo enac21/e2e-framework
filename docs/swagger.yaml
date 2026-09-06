@@ -191,18 +191,22 @@ paths:
     post:
       consumes:
       - application/json
-      description: Execute an ordered list of test IDs sequentially. Each test completes
-        before the next starts. The body may be a JSON array of test IDs (legacy),
-        an object with `test_ids`, or an object with `test_group` referencing a configured
-        group.
+      description: Execute an ordered list of test IDs sequentially, or run a configured
+        test group. The body is a plain JSON array of test IDs; alternatively pass
+        test_group as a query param to expand a configured group.
       parameters:
-      - description: Ordered list of test IDs, a {test_ids:[...]} object, or a {test_group:name}
-          object
+      - description: Name of a configured test group to run instead of an explicit
+          list
+        in: query
+        name: test_group
+        type: string
+      - description: Ordered list of test IDs (not used when test_group is set)
         in: body
-        name: rules
-        required: true
+        name: body
         schema:
-          type: object
+          items:
+            type: string
+          type: array
       - description: Duration to wait between tests (e.g. '2s'). Not applied before
           the first test.
         in: query

@@ -255,11 +255,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 // handleRunSequence godoc
 // @Summary Run a sequence of tests
-// @Description Execute an ordered list of test IDs sequentially. Each test completes before the next starts. The body may be a JSON array of test IDs (legacy), an object with `test_ids`, or an object with `test_group` referencing a configured group.
+// @Description Execute an ordered list of test IDs sequentially, or run a configured test group. The body is a plain JSON array of test IDs; alternatively pass test_group as a query param to expand a configured group.
 // @Tags Tests
 // @Accept json
 // @Produce json
-// @Param rules body object true "Ordered list of test IDs, a {test_ids:[...]} object, or a {test_group:name} object"
+// @Param test_group query string false "Name of a configured test group to run instead of an explicit list"
+// @Param body body []string false "Ordered list of test IDs (not used when test_group is set)"
 // @Param test_delay query string false "Duration to wait between tests (e.g. '2s'). Not applied before the first test."
 // @Param skip_fail_test query bool false "Stop the sequence after the first failed or errored test (default false)"
 // @Success 200 {array} domain.TestResult
@@ -275,6 +276,27 @@ func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rules := make([]string, 0)
+	var group *ports.TestGroup
+
+	if groupName := r.URL.Query().Get("test_group"); groupName != "" {
+		if s.cfg.Resolver == nil {
+			http.Error(w, fmt.Sprintf("test group %q not found", groupName), http.StatusNotFound)
+
+			return
+		}
+
+		resolved, ok := s.cfg.Resolver.Resolve(groupName)
+		if !ok {
+			http.Error(w, fmt.Sprintf("test group %q not found", groupName), http.StatusNotFound)
+
+			return
+		}
+
+		group = &resolved
+		rules = resolved.Tests
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -282,50 +304,14 @@ func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type sequenceRequest struct {
-		TestGroup string   `json:"test_group"`
-		TestIDs   []string `json:"test_ids"`
-	}
-
-	var req sequenceRequest
-	rules := make([]string, 0)
-	var group *ports.TestGroup
-
-	if err := json.Unmarshal(body, &req); err == nil {
-		// Object form: { test_group } or { test_ids }.
-		if req.TestGroup != "" && len(req.TestIDs) > 0 {
-			http.Error(w, "test_group and test_ids are mutually exclusive", http.StatusBadRequest)
+	if trimmed := strings.TrimSpace(string(body)); trimmed != "" {
+		if group != nil {
+			http.Error(w, "test_group and body test list are mutually exclusive", http.StatusBadRequest)
 
 			return
 		}
 
-		switch {
-		case req.TestGroup != "":
-			if s.cfg.Resolver == nil {
-				http.Error(w, fmt.Sprintf("test group %q not found", req.TestGroup), http.StatusNotFound)
-
-				return
-			}
-
-			resolved, ok := s.cfg.Resolver.Resolve(req.TestGroup)
-			if !ok {
-				http.Error(w, fmt.Sprintf("test group %q not found", req.TestGroup), http.StatusNotFound)
-
-				return
-			}
-
-			group = &resolved
-			rules = resolved.Tests
-		case len(req.TestIDs) > 0:
-			rules = req.TestIDs
-		default:
-			http.Error(w, "rules must not be empty", http.StatusBadRequest)
-
-			return
-		}
-	} else {
-		// Legacy array form: ["a","b","c"].
-		if err := json.Unmarshal(body, &rules); err != nil {
+		if err := json.Unmarshal([]byte(trimmed), &rules); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 
 			return

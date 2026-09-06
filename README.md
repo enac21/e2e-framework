@@ -189,26 +189,20 @@ make docker-down
 
 ### Run a test group
 
-`POST /run-sequence` accepts three body shapes:
+`POST /run-sequence` runs tests in order. The **body is a plain JSON array of
+test IDs**; alternatively, a `test_group` query param runs a named,
+pre-configured group:
 
 ```bash
-# 1) Legacy: raw JSON array of test IDs
+# Explicit list of test IDs
 curl -X POST http://localhost:8082/run-sequence \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '["crear_y_verificar_producto","local_loop_test"]'
 
-# 2) Object with an explicit list
-curl -X POST http://localhost:8082/run-sequence \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"test_ids":["crear_y_verificar_producto","local_loop_test"]}'
-
-# 3) Named, pre-configured group
-curl -X POST http://localhost:8082/run-sequence \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"test_group":"ci"}'
+# Named, pre-configured group (test_group as query param)
+curl -X POST "http://localhost:8082/run-sequence?test_group=ci" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 **CI/CD story:** a group lets you change *which* tests a pipeline runs by
@@ -229,8 +223,9 @@ test_groups:
 - `tests` — the ordered list of test IDs to run.
 - `test_delay` / `skip_fail_test` — optional per-group defaults for the
   `test_delay` and `skip_fail_test` query params.
-- `test_group` and `test_ids` are **mutually exclusive** (400 if both are sent).
-- An unknown `test_group` returns `404`; an empty resolved list returns `400`.
+- `test_group` and a body test list are **mutually exclusive** (400 if both
+  are sent).
+- An unknown `test_group` returns `404`; an empty list returns `400`.
 
 **Precedence:** explicit query params (`test_delay`, `skip_fail_test`) always
 win; otherwise the group's defaults apply; otherwise the built-in defaults

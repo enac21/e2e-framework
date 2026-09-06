@@ -10,15 +10,14 @@ The format follows a chronological order, newest changes first.
 - **New config block** (`configs/config.yaml`): `test_groups` maps a name to a `TestGroupConfig` (`description`, ordered `tests` list, optional `test_delay` and `skip_fail_test` defaults). Parsed by `internal/pkg/config/config.go`.
 - **Validation at startup** (`config.ValidateTestGroups`, called from `main.go`): every group must have at least one test, and every referenced test id must resolve to a loaded `TestDefinition` — otherwise the service fails fast to avoid silent pipeline gaps.
 - **`ports.GroupResolver`** (`internal/core/ports/group_resolver.go`) + `services.GroupResolver` implementation (`group_resolver.go`): keeps the API adapter decoupled from config internals (Option B). Injected into `api.NewServer` via `api.Config.Resolver`.
-- **`POST /run-sequence` now accepts three body shapes** (`internal/adapters/primary/api/server.go`):
-  1. Legacy raw array `["a","b"]` (unchanged, backward compatible).
-  2. Object `{"test_ids":["a","b"]}`.
-  3. Object `{"test_group":"ci"}` — expands the configured group; unknown group → `404`.
-  - `test_group` + `test_ids` together → `400`; empty resolved list → `400`.
+- **`POST /run-sequence` body + query API** (`internal/adapters/primary/api/server.go`):
+  1. Body: plain JSON array of test IDs `["a","b"]`.
+  2. `test_group` query param (`?test_group=ci`) — expands the configured group; unknown group → `404`.
+  - `test_group` + a non-empty body list together → `400`; empty list → `400`.
   - `test_delay`/`skip_fail_test` precedence: explicit query params always win → else group defaults → else built-in defaults.
-- **Swagger regenerated** (`swag init`) for the new `/run-sequence` body schema.
-- **Tests**: API handler group tests (object `test_ids`, group success, unknown group 404, mutual exclusion 400, query-overrides-group-defaults), and config tests (group parsing + `ValidateTestGroups` empty/unknown cases).
-- **Docs**: README "Run a test group" section (three body shapes + CI/CD story + `test_groups` reference) and `configs/config.example.yaml` example.
+- **Swagger regenerated** (`swag init`) for the current `/run-sequence` params (body `[]string` + `test_group` query param).
+- **Tests**: API handler group tests (group via query param, unknown group 404, mutual exclusion 400, query-overrides-group-defaults), and config tests (group parsing + `ValidateTestGroups` empty/unknown cases).
+- **Docs**: README "Run a test group" section (array body + `test_group` query param + CI/CD story + `test_groups` reference) and `configs/config.example.yaml` example.
 
 ---
 

@@ -104,8 +104,6 @@ func LoadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// ValidateTestGroups checks that every group has at least one test and that
-// every referenced test id resolves to a loaded test definition.
 func ValidateTestGroups(groups map[string]TestGroupConfig, tests map[string]domain.TestDefinition) error {
 	for name, group := range groups {
 		if len(group.Tests) == 0 {

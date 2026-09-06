@@ -5,8 +5,6 @@ import (
 	"e2e-framework/internal/pkg/config"
 )
 
-// GroupResolver implements ports.GroupResolver backed by the configured
-// test_groups map.
 type GroupResolver struct {
 	groups map[string]config.TestGroupConfig
 }

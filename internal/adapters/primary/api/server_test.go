@@ -323,43 +323,6 @@ func TestHandleRunSequence_SkipFailTest_False_ReturnsAllResults(t *testing.T) {
 	<-notified
 }
 
-func TestHandleRunSequence_ObjectTestIDs(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	tests := map[string]domain.TestDefinition{
-		"a": {ID: "a", Enabled: true},
-		"b": {ID: "b", Enabled: true},
-	}
-	srv, _, _ := newTestServer(t, ctrl, tests)
-	w := postBody(srv, "/run-sequence", `{"test_ids":["a","b"]}`)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	var results []*domain.TestResult
-	if err := json.NewDecoder(w.Body).Decode(&results); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-}
-
-func TestHandleRunSequence_EmptyTestIDs(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	srv, _, _ := newTestServer(t, ctrl, map[string]domain.TestDefinition{})
-	w := postBody(srv, "/run-sequence", `{"test_ids":[]}`)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
-	}
-}
-
 func TestHandleRunSequence_TestGroup_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -372,7 +335,7 @@ func TestHandleRunSequence_TestGroup_Success(t *testing.T) {
 		"ci": {Tests: []string{"a", "b"}, TestDelay: 2 * time.Second, SkipFailTest: true},
 	}
 	srv, _, _ := newTestServer(t, ctrl, tests, groups)
-	w := postBody(srv, "/run-sequence", `{"test_group":"ci"}`)
+	w := postBody(srv, "/run-sequence?test_group=ci", "")
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -393,19 +356,25 @@ func TestHandleRunSequence_TestGroup_NotFound(t *testing.T) {
 	defer ctrl.Finish()
 
 	srv, _, _ := newTestServer(t, ctrl, map[string]domain.TestDefinition{})
-	w := postBody(srv, "/run-sequence", `{"test_group":"nope"}`)
+	w := postBody(srv, "/run-sequence?test_group=nope", "")
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
 	}
 }
 
-func TestHandleRunSequence_TestGroupAndTestIDs_MutuallyExclusive(t *testing.T) {
+func TestHandleRunSequence_TestGroupAndBodyList_MutuallyExclusive(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	srv, _, _ := newTestServer(t, ctrl, map[string]domain.TestDefinition{})
-	w := postBody(srv, "/run-sequence", `{"test_group":"ci","test_ids":["a"]}`)
+	tests := map[string]domain.TestDefinition{
+		"a": {ID: "a", Enabled: true},
+	}
+	groups := map[string]config.TestGroupConfig{
+		"ci": {Tests: []string{"a"}},
+	}
+	srv, _, _ := newTestServer(t, ctrl, tests, groups)
+	w := postBody(srv, "/run-sequence?test_group=ci", `["a"]`)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
@@ -436,8 +405,7 @@ func TestHandleRunSequence_TestGroup_QueryOverridesGroupDefaults(t *testing.T) {
 		Do(func(context.Context, domain.OnFailureConfig, *domain.TestResult) { close(notified) }).
 		Return(nil)
 
-	// Explicit skip_fail_test=false overrides the group default (true), so both tests run.
-	w := postBody(srv, "/run-sequence?skip_fail_test=false", `{"test_group":"ci"}`)
+	w := postBody(srv, "/run-sequence?test_group=ci&skip_fail_test=false", "")
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)

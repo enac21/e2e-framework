@@ -172,7 +172,7 @@ const docTemplate = `{
         },
         "/run-sequence": {
             "post": {
-                "description": "Execute an ordered list of test IDs sequentially. Each test completes before the next starts. The body may be a JSON array of test IDs (legacy), an object with ` + "`" + `test_ids` + "`" + `, or an object with ` + "`" + `test_group` + "`" + ` referencing a configured group.",
+                "description": "Execute an ordered list of test IDs sequentially, or run a configured test group. The body is a plain JSON array of test IDs; alternatively pass test_group as a query param to expand a configured group.",
                 "consumes": [
                     "application/json"
                 ],
@@ -185,12 +185,20 @@ const docTemplate = `{
                 "summary": "Run a sequence of tests",
                 "parameters": [
                     {
-                        "description": "Ordered list of test IDs, a {test_ids:[...]} object, or a {test_group:name} object",
-                        "name": "rules",
+                        "type": "string",
+                        "description": "Name of a configured test group to run instead of an explicit list",
+                        "name": "test_group",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Ordered list of test IDs (not used when test_group is set)",
+                        "name": "body",
                         "in": "body",
-                        "required": true,
                         "schema": {
-                            "type": "object"
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         }
                     },
                     {
