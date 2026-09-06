@@ -24,8 +24,7 @@ definitions:
     type: object
   domain.ReceiverResult:
     properties:
-      durationMs:
-        format: int64
+      duration_ms:
         type: integer
       error:
         type: string
@@ -33,6 +32,8 @@ definitions:
         $ref: '#/definitions/domain.Message'
       status:
         $ref: '#/definitions/domain.RunStatus'
+      trigger_index:
+        type: integer
       type:
         type: string
     type: object
@@ -52,41 +53,34 @@ definitions:
     - StatusRunning
   domain.TestResult:
     properties:
-      durationMs:
-        format: int64
+      attempts:
+        type: integer
+      duration_ms:
         type: integer
       error:
         type: string
-      finishedAt:
+      finished_at:
         type: string
       receivers:
         items:
           $ref: '#/definitions/domain.ReceiverResult'
         type: array
-      runID:
+      run_id:
         type: string
-      startedAt:
+      started_at:
         type: string
       status:
         $ref: '#/definitions/domain.RunStatus'
-      testID:
+      test_id:
         type: string
-      triggerVars:
+      trigger_vars:
         additionalProperties:
           type: string
         type: object
     type: object
-host: localhost:8080
 info:
-  contact:
-    email: support@swagger.io
-    name: API Support
-    url: http://www.swagger.io/support
+  contact: {}
   description: This is the API for the e2e-framework testing service.
-  license:
-    name: Apache 2.0
-    url: http://www.apache.org/licenses/LICENSE-2.0.html
-  termsOfService: http://swagger.io/terms/
   title: e2e-framework API
   version: "1.0"
 paths:
@@ -117,6 +111,10 @@ paths:
             items:
               $ref: '#/definitions/domain.TestResult'
             type: array
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
       summary: List test results
       tags:
       - Results
@@ -138,6 +136,10 @@ paths:
             $ref: '#/definitions/domain.TestResult'
         "400":
           description: Run ID required
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
         "404":
@@ -170,6 +172,10 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "404":
           description: Test ID not found
           schema:
@@ -181,11 +187,65 @@ paths:
       summary: Run a test
       tags:
       - Tests
+  /run-sequence:
+    post:
+      consumes:
+      - application/json
+      description: Execute an ordered list of test IDs sequentially. Each test completes
+        before the next starts. The body may be a JSON array of test IDs (legacy),
+        an object with `test_ids`, or an object with `test_group` referencing a configured
+        group.
+      parameters:
+      - description: Ordered list of test IDs, a {test_ids:[...]} object, or a {test_group:name}
+          object
+        in: body
+        name: rules
+        required: true
+        schema:
+          type: object
+      - description: Duration to wait between tests (e.g. '2s'). Not applied before
+          the first test.
+        in: query
+        name: test_delay
+        type: string
+      - description: Stop the sequence after the first failed or errored test (default
+          false)
+        in: query
+        name: skip_fail_test
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/domain.TestResult'
+            type: array
+        "400":
+          description: Invalid body or parameters
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "404":
+          description: Test ID or test group not found
+          schema:
+            type: string
+        "405":
+          description: Method not allowed
+          schema:
+            type: string
+      summary: Run a sequence of tests
+      tags:
+      - Tests
   /webhook/{provider}:
     post:
       description: Deposit messages from providers into the store
       parameters:
-      - description: Provider name (e.g., github, gitlab)
+      - description: Provider name (e.g., twilio, meta)
         in: path
         name: provider
         required: true
@@ -197,6 +257,10 @@ paths:
           description: Accepted
         "400":
           description: Error extracting message data
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
         "404":

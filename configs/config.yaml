@@ -33,6 +33,18 @@ scheduler:
 tests:
   path: "tests"
 
+test_groups:
+  ci:
+    description: "Pipeline that runs after every merge"
+    tests:
+      - local_loop_test
+      - example_variables
+    test_delay: 2s
+    skip_fail_test: true
+  smoke:
+    tests:
+      - local_loop_test
+
 receivers:
   sms:
     provider: twilio

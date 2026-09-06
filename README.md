@@ -182,9 +182,59 @@ make docker-down
 |--------|------|------|-------------|
 | `GET`  | `/health` | No | Liveness check |
 | `POST` | `/run?id={test_id}` | Yes | Trigger a specific test |
+| `POST` | `/run-sequence` | Yes | Run an ordered sequence of tests (see [Run a test group](#run-a-test-group)) |
 | `GET`  | `/results` | Yes | All stored test results (last 100) |
 | `GET`  | `/results/{run_id}` | Yes | Result for a specific run (poll for async) |
 | `GET`  | `/swagger/` | Yes | Interactive API docs (Swagger UI) |
+
+### Run a test group
+
+`POST /run-sequence` accepts three body shapes:
+
+```bash
+# 1) Legacy: raw JSON array of test IDs
+curl -X POST http://localhost:8082/run-sequence \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '["crear_y_verificar_producto","local_loop_test"]'
+
+# 2) Object with an explicit list
+curl -X POST http://localhost:8082/run-sequence \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"test_ids":["crear_y_verificar_producto","local_loop_test"]}'
+
+# 3) Named, pre-configured group
+curl -X POST http://localhost:8082/run-sequence \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"test_group":"ci"}'
+```
+
+**CI/CD story:** a group lets you change *which* tests a pipeline runs by
+editing `configs/config.yaml` only — the script/call that hits the endpoint
+never changes:
+
+```yaml
+test_groups:
+  ci:
+    description: "Pipeline that runs after every merge"
+    tests:
+      - crear_y_verificar_producto
+      - local_loop_test
+    test_delay: 2s
+    skip_fail_test: true
+```
+
+- `tests` — the ordered list of test IDs to run.
+- `test_delay` / `skip_fail_test` — optional per-group defaults for the
+  `test_delay` and `skip_fail_test` query params.
+- `test_group` and `test_ids` are **mutually exclusive** (400 if both are sent).
+- An unknown `test_group` returns `404`; an empty resolved list returns `400`.
+
+**Precedence:** explicit query params (`test_delay`, `skip_fail_test`) always
+win; otherwise the group's defaults apply; otherwise the built-in defaults
+(`0`, `false`).
 
 ### Authentication
 
@@ -865,6 +915,15 @@ scheduler:
 
 tests:
   path: "./tests"      # Directory containing YAML test definitions
+
+test_groups:
+  ci:
+    description: "Pipeline that runs after every merge"
+    tests:
+      - local_loop_test
+      - example_variables
+    test_delay: 2s
+    skip_fail_test: true
 
 receivers:
   sms:

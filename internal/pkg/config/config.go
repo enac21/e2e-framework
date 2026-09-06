@@ -30,9 +30,16 @@ type MemoryStoreConfig struct {
 	TTL time.Duration `yaml:"ttl"`
 }
 
+type TestGroupConfig struct {
+	Description  string        `yaml:"description"`
+	Tests        []string      `yaml:"tests"`
+	TestDelay    time.Duration `yaml:"test_delay"`
+	SkipFailTest bool          `yaml:"skip_fail_test"`
+}
+
 type StoreConfig struct {
-	Type     string             `yaml:"type"`
-	Redis    RedisStoreConfig   `yaml:"redis"`
+	Type     string              `yaml:"type"`
+	Redis    RedisStoreConfig    `yaml:"redis"`
 	Postgres PostgresStoreConfig `yaml:"postgres"`
 	Memory   MemoryStoreConfig   `yaml:"memory"`
 }
@@ -45,8 +52,9 @@ type Config struct {
 		Enabled   bool   `yaml:"enabled"`
 		JWTSecret string `yaml:"jwt_secret"`
 	} `yaml:"auth"`
-	Store StoreConfig `yaml:"store"`
-	Tests struct {
+	Store      StoreConfig               `yaml:"store"`
+	TestGroups map[string]TestGroupConfig `yaml:"test_groups"`
+	Tests      struct {
 		Path string `yaml:"path"`
 	} `yaml:"tests"`
 }
@@ -94,4 +102,22 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// ValidateTestGroups checks that every group has at least one test and that
+// every referenced test id resolves to a loaded test definition.
+func ValidateTestGroups(groups map[string]TestGroupConfig, tests map[string]domain.TestDefinition) error {
+	for name, group := range groups {
+		if len(group.Tests) == 0 {
+			return fmt.Errorf("%w: test group %q has no tests", domain.ErrConfiguration, name)
+		}
+
+		for _, id := range group.Tests {
+			if _, ok := tests[id]; !ok {
+				return fmt.Errorf("%w: test group %q references unknown test %q", domain.ErrConfiguration, name, id)
+			}
+		}
+	}
+
+	return nil
 }

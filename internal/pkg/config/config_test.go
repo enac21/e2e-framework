@@ -3,8 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"e2e-framework/internal/core/domain"
 )
 
 func writeConfig(t *testing.T, content string) string {
@@ -108,5 +111,94 @@ store:
 
 	if cfg.Store.Type != "none" {
 		t.Errorf("expected STORE_TYPE override to none, got %q", cfg.Store.Type)
+	}
+}
+
+func TestLoadConfig_TestGroups(t *testing.T) {
+	path := writeConfig(t, `
+test_groups:
+  ci:
+    description: "Pipeline after merge"
+    tests:
+      - local_loop_test
+      - example_variables
+    test_delay: 2s
+    skip_fail_test: true
+  smoke:
+    tests:
+      - local_loop_test
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if len(cfg.TestGroups) != 2 {
+		t.Fatalf("expected 2 test groups, got %d", len(cfg.TestGroups))
+	}
+
+	ci, ok := cfg.TestGroups["ci"]
+	if !ok {
+		t.Fatal("expected ci group")
+	}
+
+	if len(ci.Tests) != 2 || ci.Tests[0] != "local_loop_test" {
+		t.Errorf("unexpected ci tests: %v", ci.Tests)
+	}
+
+	if ci.TestDelay != 2*time.Second {
+		t.Errorf("expected ci test_delay 2s, got %v", ci.TestDelay)
+	}
+
+	if !ci.SkipFailTest {
+		t.Error("expected ci skip_fail_test true")
+	}
+
+	if ci.Description != "Pipeline after merge" {
+		t.Errorf("unexpected ci description %q", ci.Description)
+	}
+}
+
+func TestValidateTestGroups_OK(t *testing.T) {
+	groups := map[string]TestGroupConfig{
+		"ci": {Tests: []string{"a", "b"}},
+	}
+	tests := map[string]domain.TestDefinition{
+		"a": {ID: "a"},
+		"b": {ID: "b"},
+	}
+
+	if err := ValidateTestGroups(groups, tests); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateTestGroups_EmptyGroup(t *testing.T) {
+	groups := map[string]TestGroupConfig{
+		"ci": {Tests: []string{}},
+	}
+
+	err := ValidateTestGroups(groups, map[string]domain.TestDefinition{})
+	if err == nil {
+		t.Fatal("expected error for empty group")
+	}
+
+	if !strings.Contains(err.Error(), "has no tests") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateTestGroups_UnknownTest(t *testing.T) {
+	groups := map[string]TestGroupConfig{
+		"ci": {Tests: []string{"missing"}},
+	}
+
+	err := ValidateTestGroups(groups, map[string]domain.TestDefinition{})
+	if err == nil {
+		t.Fatal("expected error for unknown test")
+	}
+
+	if !strings.Contains(err.Error(), "unknown test") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

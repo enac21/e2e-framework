@@ -5,6 +5,23 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-09-06] — Named test groups (`test_group`) for `/run-sequence`
+
+- **New config block** (`configs/config.yaml`): `test_groups` maps a name to a `TestGroupConfig` (`description`, ordered `tests` list, optional `test_delay` and `skip_fail_test` defaults). Parsed by `internal/pkg/config/config.go`.
+- **Validation at startup** (`config.ValidateTestGroups`, called from `main.go`): every group must have at least one test, and every referenced test id must resolve to a loaded `TestDefinition` — otherwise the service fails fast to avoid silent pipeline gaps.
+- **`ports.GroupResolver`** (`internal/core/ports/group_resolver.go`) + `services.GroupResolver` implementation (`group_resolver.go`): keeps the API adapter decoupled from config internals (Option B). Injected into `api.NewServer` via `api.Config.Resolver`.
+- **`POST /run-sequence` now accepts three body shapes** (`internal/adapters/primary/api/server.go`):
+  1. Legacy raw array `["a","b"]` (unchanged, backward compatible).
+  2. Object `{"test_ids":["a","b"]}`.
+  3. Object `{"test_group":"ci"}` — expands the configured group; unknown group → `404`.
+  - `test_group` + `test_ids` together → `400`; empty resolved list → `400`.
+  - `test_delay`/`skip_fail_test` precedence: explicit query params always win → else group defaults → else built-in defaults.
+- **Swagger regenerated** (`swag init`) for the new `/run-sequence` body schema.
+- **Tests**: API handler group tests (object `test_ids`, group success, unknown group 404, mutual exclusion 400, query-overrides-group-defaults), and config tests (group parsing + `ValidateTestGroups` empty/unknown cases).
+- **Docs**: README "Run a test group" section (three body shapes + CI/CD story + `test_groups` reference) and `configs/config.example.yaml` example.
+
+---
+
 ## [2026-09-06] — Pluggable store backends (Redis / PostgreSQL / In-Memory / none)
 
 - **`StoreRegistry` factory** (`internal/adapters/secondary/store/registry.go`): mirrors the trigger registry — `NewStoreRegistry`, `Register(type, factory)`, `Create(type, cfg)` with `domain.ErrConfiguration` for unknown types. Adding a backend is now a new file + one `Register` line in `main.go` (Open/Closed).

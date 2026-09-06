@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/services"
 
 	_ "e2e-framework/docs"
@@ -39,6 +41,7 @@ type Config struct {
 	Port       int
 	AuthEnable bool
 	JWTSecret  string
+	Resolver   ports.GroupResolver
 }
 
 func (s *Server) Mux() *http.ServeMux {
@@ -252,17 +255,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 // handleRunSequence godoc
 // @Summary Run a sequence of tests
-// @Description Execute an ordered list of test IDs sequentially. Each test completes before the next starts.
+// @Description Execute an ordered list of test IDs sequentially. Each test completes before the next starts. The body may be a JSON array of test IDs (legacy), an object with `test_ids`, or an object with `test_group` referencing a configured group.
 // @Tags Tests
 // @Accept json
 // @Produce json
-// @Param rules body []string true "Ordered list of test IDs to execute"
+// @Param rules body object true "Ordered list of test IDs, a {test_ids:[...]} object, or a {test_group:name} object"
 // @Param test_delay query string false "Duration to wait between tests (e.g. '2s'). Not applied before the first test."
 // @Param skip_fail_test query bool false "Stop the sequence after the first failed or errored test (default false)"
 // @Success 200 {array} domain.TestResult
 // @Failure 400 {string} string "Invalid body or parameters"
 // @Failure 401 {string} string "Unauthorized"
-// @Failure 404 {string} string "Test ID not found"
+// @Failure 404 {string} string "Test ID or test group not found"
 // @Failure 405 {string} string "Method not allowed"
 // @Router /run-sequence [post]
 func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
@@ -272,11 +275,61 @@ func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var rules []string
-	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 
 		return
+	}
+
+	type sequenceRequest struct {
+		TestGroup string   `json:"test_group"`
+		TestIDs   []string `json:"test_ids"`
+	}
+
+	var req sequenceRequest
+	rules := make([]string, 0)
+	var group *ports.TestGroup
+
+	if err := json.Unmarshal(body, &req); err == nil {
+		// Object form: { test_group } or { test_ids }.
+		if req.TestGroup != "" && len(req.TestIDs) > 0 {
+			http.Error(w, "test_group and test_ids are mutually exclusive", http.StatusBadRequest)
+
+			return
+		}
+
+		switch {
+		case req.TestGroup != "":
+			if s.cfg.Resolver == nil {
+				http.Error(w, fmt.Sprintf("test group %q not found", req.TestGroup), http.StatusNotFound)
+
+				return
+			}
+
+			resolved, ok := s.cfg.Resolver.Resolve(req.TestGroup)
+			if !ok {
+				http.Error(w, fmt.Sprintf("test group %q not found", req.TestGroup), http.StatusNotFound)
+
+				return
+			}
+
+			group = &resolved
+			rules = resolved.Tests
+		case len(req.TestIDs) > 0:
+			rules = req.TestIDs
+		default:
+			http.Error(w, "rules must not be empty", http.StatusBadRequest)
+
+			return
+		}
+	} else {
+		// Legacy array form: ["a","b","c"].
+		if err := json.Unmarshal(body, &rules); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+
+			return
+		}
 	}
 
 	if len(rules) == 0 {
@@ -286,19 +339,37 @@ func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var delay time.Duration
+	delaySet := false
 
 	if raw := r.URL.Query().Get("test_delay"); raw != "" {
-		var err error
-
-		delay, err = time.ParseDuration(raw)
+		parsed, err := time.ParseDuration(raw)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("invalid test_delay: %v", err), http.StatusBadRequest)
 
 			return
 		}
+
+		delay = parsed
+		delaySet = true
 	}
 
-	skipFailTest := r.URL.Query().Get("skip_fail_test") == "true"
+	var skipFailTest bool
+	skipSet := false
+
+	if raw := r.URL.Query().Get("skip_fail_test"); raw != "" {
+		skipFailTest = raw == "true"
+		skipSet = true
+	}
+
+	if group != nil {
+		if !delaySet {
+			delay = group.TestDelay
+		}
+
+		if !skipSet {
+			skipFailTest = group.SkipFailTest
+		}
+	}
 
 	defs := make([]domain.TestDefinition, 0, len(rules))
 

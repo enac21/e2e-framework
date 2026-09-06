@@ -144,10 +144,17 @@ func main() {
 	)
 
 	// Setup primary adapters
+	if err := config.ValidateTestGroups(cfg.TestGroups, tests); err != nil {
+		log.Fatalf("invalid test groups config: %v", err)
+	}
+
+	groupResolver := services.NewGroupResolver(cfg.TestGroups)
+
 	apiServer := api.NewServer(&api.Config{
 		Port:       cfg.Server.Port,
 		AuthEnable: cfg.Auth.Enabled,
 		JWTSecret:  cfg.Auth.JWTSecret,
+		Resolver:   groupResolver,
 	}, orchestrator, tests)
 
 	whServer := webhook.NewServer(s)
