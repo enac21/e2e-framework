@@ -842,6 +842,78 @@ receivers:
 
 For webhook-based receivers (e.g., `request`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
 
+### API Receiver (`type: api`)
+
+There are **two** "API receiver" flows:
+
+| Flow | Type | Semantics |
+|------|------|-----------|
+| **Webhook / home-delivered** | `request` (existing) | A provider pushes a message to the webhook server; the receiver polls the store until it arrives or times out. |
+| **Outbound polling** | `api` (new) | The receiver **makes the HTTP call itself**, repeatedly, until the response satisfies the predicate or the budget (`timeout`) expires. |
+
+The `type: api` receiver behaves like a **trigger that polls**: every `interval`
+it executes an HTTP request and succeeds when `expected_status` and the
+trigger-style `response_assertions` both pass. Failures are **transient** — only
+the `timeout` fails the run, so it composes naturally on an eventual-consistency
+verification step.
+
+```yaml
+triggers:
+  - method: POST
+    url: "{{env.orders_api}}/checkout"
+    body:
+      order_id: "{{order_id}}"
+    receivers:
+      - type: api
+        interval: 5s          # polling cadence (default 5s)
+        timeout: 60s          # overall polling budget
+        # trigger-like fields:
+        method: GET
+        url: "{{env.orders_api}}/orders/{{order_id}}"
+        headers:
+          Authorization: "Bearer {{env.API_TOKEN}}"
+        expected_status: 200
+        response_assertions:
+          - type: equals
+            field: data.status
+            value: "paid"
+        extract:
+          payment_id: "data.payment_id"
+        # optional message-style assertions on the flattened response
+        assertions:
+          - type: contains
+            field: body
+            value: "paid"
+    wait_for_receivers: true
+```
+
+**Fields:**
+
+- `interval` — how often to poll (Go duration, e.g. `5s`). Default `5s`.
+- `timeout` — overall budget for polling; after it, the receiver returns
+  `ErrTimeout` and the test fails. Required unless you want the run's own
+  deadline to govern.
+- `method` (default `GET`), `url` (required), `headers`, `body` — the polled
+  request. `body` is serialized as JSON unless `Content-Type:
+  application/x-www-form-urlencoded` is set (same rules as triggers).
+- `expected_status` — when set (> 0), the attempt passes **only** if the status
+  matches exactly; when unset, any 2xx/3xx passes and 4xx/5xx is a transient
+  failure.
+- `response_assertions` — the trigger assertion types (`equals`, `contains`,
+  `present`, `array_contains`, `int_gt`, …) evaluated against the flattened
+  JSON body of **each** poll. Values support `{{variable}}` substitution.
+- `{{variable}}` substitution works in `url`, `headers`, `body` and assertion
+  values — the receiver receives the full run variables (from `variables:`,
+  prior triggers' `extract`, and `run_id`).
+- `extract` — accepted by the schema but **not** yet merged back into run
+  variables (planned separately).
+- `assertions` — message-style assertions run by the orchestrator **after** the
+  polling predicate passes, against the flattened response body.
+
+On success the receiver returns the response as a `domain.Message` (`Headers`,
+`Fields` flattened from the JSON body, `Raw` body), so message-style `assertions`
+keep working as with any other receiver.
+
 ### Retry Logic
 
 By default, a test runs once and is marked as failed if any receiver times out or any assertion does not pass. For flaky or eventually-consistent systems, you can configure automatic retries using the `retry` block:

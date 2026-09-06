@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/adapters/secondary/notifier"
 	"e2e-framework/internal/adapters/secondary/receiver"
+	receiverapi "e2e-framework/internal/adapters/secondary/receiver/api"
 	"e2e-framework/internal/adapters/secondary/receiver/imap"
 	"e2e-framework/internal/adapters/secondary/receiver/request"
 	"e2e-framework/internal/adapters/secondary/store"
@@ -107,14 +109,20 @@ func main() {
 	receiverReg := receiver.NewReceiverRegistry()
 	receiverReg.Register(
 		domain.RequestReceiverType,
-		func(options map[string]string) (ports.Receiver, error) {
+		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
 			return request.NewRequestReceiver(s), nil
 		},
 	)
 	receiverReg.Register(
 		domain.ImapReceiverType,
-		func(options map[string]string) (ports.Receiver, error) {
-			return imap.NewIMAPReceiver(options)
+		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
+			return imap.NewIMAPReceiver(cfg.Options)
+		},
+	)
+	receiverReg.Register(
+		domain.APIReceiverType,
+		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
+			return receiverapi.NewAPIPollingReceiver(cfg, triggerAssertionReg, &http.Client{})
 		},
 	)
 

@@ -5,6 +5,19 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-09-07] — API receiver (`type: api`): outbound HTTP polling
+
+- **New receiver type** `api` (`internal/adapters/secondary/receiver/api/receiver.go`): implements a **trigger that polls** — executes an outbound HTTP request every `interval` until `expected_status` + trigger-style `response_assertions` pass, or until the receiver `timeout` expires (`domain.ErrTimeout`). Failures are transient; only the timeout fails the run. On success it returns the response as a `domain.Message` (`Headers`, `Fields` flattened from the JSON body, `Raw`), so message-style `assertions` keep working.
+- **`ReceiverConfig`** (`domain/test.go`) gained trigger-like fields: `interval`, `method`, `url`, `headers`, `body`, `expected_status`, `response_assertions` and `extract`. `method`/`url`/`headers`/`body` support `{{variable}}` substitution with the run variables.
+- **`ports.Receiver` interface change**: `Start(ctx, runID)` → `Start(ctx, runID, vars map[string]string)`. The orchestrator now passes the resolved `triggerVars` (run_id + `variables:` block + prior triggers' `extract`) at `startReceivers`, so receivers can render templates. `request` and `imap` receivers updated (imap stores the vars).
+- **`ReceiverFactory` signature change** (`registry.go`): the factory now receives the full `domain.ReceiverConfig` instead of `options map[string]string` — required so structured receiver fields (body map, `response_assertions` list) reach the constructor, mirroring how `TriggerConfig` flows into triggers. Existing receivers read `cfg.Options` unchanged.
+- **Wiring** (`cmd/server/main.go`): `receiverReg.Register(domain.APIReceiverType, ...)` builds the receiver with the trigger assertion registry + an `*http.Client`.
+- **`//go:generate` directives** added to the 7 ports with committed mocks (`mockgen` via `go run -mod=mod go.uber.org/mock/mockgen`), so `make mocks` actually regenerates. `mock_receiver.go` regenerated for the new `Start` signature.
+- **Tests**: `receiver/api/receiver_test.go` (missing url → `ErrConfiguration`; first-poll success; retry on status mismatch then success; retry on `response_assertions` failure → `ErrTimeout`; `{{var}}` substitution in url/headers/body; not-started guard; message fields for message-style assertions) and an orchestrator test proving `triggerVars` reach `Start`. IMAP receiver tests updated for the new signature.
+- **Docs**: README "API Receiver (`type: api`)" section (both flows table + full YAML reference), `CONTRIBUTING.md` updated interface/registration examples, and `tests/example_api_polling.yaml`.
+
+---
+
 ## [2026-09-06] — Named test groups (`test_group`) for `/run-sequence`
 
 - **New config block** (`configs/config.yaml`): `test_groups` maps a name to a `TestGroupConfig` (`description`, ordered `tests` list, optional `test_delay` and `skip_fail_test` defaults). Parsed by `internal/pkg/config/config.go`.

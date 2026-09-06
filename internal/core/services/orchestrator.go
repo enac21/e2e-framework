@@ -206,7 +206,7 @@ func (o *Orchestrator) executeSequential(
 				break
 			}
 
-			active, startErr := o.startReceivers(ctx, triggerStep.Receivers, runID)
+			active, startErr := o.startReceivers(ctx, triggerStep.Receivers, runID, triggerVars)
 			if startErr != nil {
 				o.failResult(result, fmt.Sprintf("step %d receiver start failed: %v", i+1, startErr))
 
@@ -267,16 +267,16 @@ func (o *Orchestrator) releaseRecipients(ctx context.Context, reserved []domain.
 	}
 }
 
-func (o *Orchestrator) startReceivers(ctx context.Context, configs []domain.ReceiverConfig, runID string) ([]activeReceiver, error) {
+func (o *Orchestrator) startReceivers(ctx context.Context, configs []domain.ReceiverConfig, runID string, triggerVars map[string]string) ([]activeReceiver, error) {
 	active := make([]activeReceiver, 0, len(configs))
 
 	for _, rcfg := range configs {
-		instance, err := o.receivers.Create(rcfg.Type, rcfg.Options)
+		instance, err := o.receivers.Create(rcfg)
 		if err != nil {
 			return active, fmt.Errorf("failed to create receiver %s: %w", rcfg.Type, err)
 		}
 
-		if err := instance.Start(ctx, runID); err != nil {
+		if err := instance.Start(ctx, runID, triggerVars); err != nil {
 			return active, fmt.Errorf("failed to start receiver %s: %w", rcfg.Type, err)
 		}
 

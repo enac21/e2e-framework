@@ -30,14 +30,17 @@ Your receiver must implement all three methods defined in `internal/core/ports/r
 
 ```go
 type Receiver interface {
-    Start(ctx context.Context, runID string) error
+    Start(ctx context.Context, runID string, vars map[string]string) error
     Collect(ctx context.Context) (*domain.Message, error)
     Stop() error
 }
 ```
 
 - **`Start()`** — Initialize the receiver for a specific test run. Register interest
-  in the store for the given `runID`, open connections, etc.
+  in the store for the given `runID`, open connections, etc. The `vars` map carries
+  the resolved run variables (`run_id`, the `variables:` block and prior triggers'
+  `extract`), so receivers that render templates (e.g. the `api` receiver) can
+  substitute them. Store them if you need them in `Collect`.
 - **`Collect()`** — Wait for and return a `domain.Message`. This should block until
   a message arrives or the context times out.
 - **`Stop()`** — Clean up resources, close connections, release store slots.
@@ -61,12 +64,14 @@ Always use `{{env.VAR_NAME}}` for secrets — never hardcode them.
 
 ### Step 4 — Register in `main.go`
 
-In `cmd/server/main.go`, instantiate your receiver and register it in the
-`ReceiverRegistry`:
+In `cmd/server/main.go`, register your receiver in the `ReceiverRegistry`. The
+factory receives the full `domain.ReceiverConfig` (so receivers that read
+structured top-level fields — like the `api` receiver — can use them); if yours
+only needs the `options:` map, read `cfg.Options`:
 
 ```go
-receiverRegistry.Register("slack", func() ports.Receiver {
-    return slack.NewReceiver(store)
+receiverRegistry.Register("slack", func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
+    return slack.NewReceiver(cfg.Options)
 })
 ```
 

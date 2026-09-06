@@ -14,6 +14,7 @@ import (
 type IMAPReceiver struct {
 	Client ports.IMAPClient
 	RunID  string
+	Vars   map[string]string
 }
 
 func NewIMAPReceiver(options map[string]string) (*IMAPReceiver, error) {
@@ -46,13 +47,14 @@ func NewIMAPReceiver(options map[string]string) (*IMAPReceiver, error) {
 	return &IMAPReceiver{Client: client}, nil
 }
 
-func (r *IMAPReceiver) Start(ctx context.Context, runID string) error {
+func (r *IMAPReceiver) Start(ctx context.Context, runID string, vars map[string]string) error {
 	if err := r.Client.Connect(); err != nil {
 		return fmt.Errorf("%w: failed to connect to IMAP server: %v", domain.ErrInternal, err)
 	}
 
 	log.Printf("[%s] IMAP receiver connected to mailbox successfully, starting to poll...", runID)
 	r.RunID = runID
+	r.Vars = vars
 
 	return nil
 }
