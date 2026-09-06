@@ -52,7 +52,7 @@ type Config struct {
 		Enabled   bool   `yaml:"enabled"`
 		JWTSecret string `yaml:"jwt_secret"`
 	} `yaml:"auth"`
-	Store      StoreConfig               `yaml:"store"`
+	Store      StoreConfig                `yaml:"store"`
 	TestGroups map[string]TestGroupConfig `yaml:"test_groups"`
 	Tests      struct {
 		Path string `yaml:"path"`
