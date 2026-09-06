@@ -422,4 +422,3 @@ func TestHandleRunSequence_TestGroup_QueryOverridesGroupDefaults(t *testing.T) {
 
 	<-notified
 }
-
