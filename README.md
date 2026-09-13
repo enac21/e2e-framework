@@ -139,7 +139,7 @@ curl http://localhost:8082/health
 ### 6. Run a test
 
 The simplest self-contained test is `local_loop_test`. It triggers the
-project's own webhook server and verifies the `request` receiver picks up
+project's own webhook server and verifies the `webhook` receiver picks up
 the message — no external services needed beyond Redis:
 
 ```bash
@@ -369,7 +369,7 @@ triggers:
           - type: contains
             field: subject
             value: "Welcome"
-      - type: request
+      - type: webhook
         timeout: 60s
         assertions:
           - type: contains
@@ -383,7 +383,7 @@ triggers:
     extract:
       status: "status"
     receivers:
-      - type: request
+      - type: webhook
         timeout: 15s
         assertions:
           - type: equals
@@ -840,7 +840,7 @@ receivers:
       tls: "true"
 ```
 
-For webhook-based receivers (e.g., `request`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
+For webhook-based receivers (e.g., `webhook`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
 
 ### API Receiver (`type: api`)
 
@@ -848,7 +848,7 @@ There are **two** "API receiver" flows:
 
 | Flow | Type | Semantics |
 |------|------|-----------|
-| **Webhook / home-delivered** | `request` (existing) | A provider pushes a message to the webhook server; the receiver polls the store until it arrives or times out. |
+| **Webhook / home-delivered** | `webhook` (existing) | A provider pushes a message to the webhook server; the receiver polls the store until it arrives or times out. |
 | **Outbound polling** | `api` (new) | The receiver **makes the HTTP call itself**, repeatedly, until the response satisfies the predicate or the budget (`timeout`) expires. |
 
 The `type: api` receiver behaves like a **trigger that polls**: every `interval`
@@ -1010,7 +1010,7 @@ logging:
 ### Store backends
 
 The message store used to buffer received messages between the webhook
-ingestion and the `request` receiver is pluggable. Select the backend with the
+ingestion and the `webhook` receiver is pluggable. Select the backend with the
 `store.type` key (`redis` | `postgres` | `memory` | `disabled`, default `redis`).
 
 | Backend | Purpose |
@@ -1018,7 +1018,7 @@ ingestion and the `request` receiver is pluggable. Select the backend with the
 | `redis` | **Default.** Distributed, supports cluster mode. Requires `REDIS_URL`. |
 | `postgres` | Distributed, relational. Requires `POSTGRES_DSN` (pgx/v5). Schema is created automatically on startup. |
 | `memory` | Single-process, in-memory, mutex-protected. No external dependency. Great for local dev and CI. |
-| `disabled` | Fully disables the database (no-op store). `request` receivers poll until their timeout. |
+| `disabled` | Fully disables the database (no-op store). `webhook` receivers poll until their timeout. |
 
 Only the section matching the selected backend is read; the others are ignored.
 `store.type` may be omitted — it defaults to `redis`, so existing config files
@@ -1026,7 +1026,7 @@ keep working unchanged.
 
 > **Running without a DB:** set `store.type: disabled` (or `STORE_TYPE=disabled`). The
 > service starts with **no** database dependency. Any test that uses a
-> `request` (webhook) receiver will time out waiting for a message, which is
+> `webhook` receiver will time out waiting for a message, which is
 > expected for DB-less runs — use this for pure HTTP-trigger tests.
 
 ### Environment variables

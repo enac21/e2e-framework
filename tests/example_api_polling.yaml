@@ -1,6 +1,6 @@
 # Example test: the `type: api` receiver (outbound HTTP polling).
 #
-# Unlike `type: request` (webhook/home-delivered messages), the `api` receiver
+# Unlike `type: webhook` (webhook/home-delivered messages), the `api` receiver
 # actively polls an HTTP endpoint every `interval` until the status code AND
 # `response_assertions` pass, or until `timeout` expires. Failures are
 # transient: only the timeout fails the run.

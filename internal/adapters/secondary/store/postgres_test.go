@@ -36,7 +36,7 @@ func TestPostgresStore_DepositClaimRoundtrip(t *testing.T) {
 
 	msg := &domain.Message{
 		RunID:        "pg-run-1",
-		ReceiverType: "request",
+		ReceiverType: "webhook",
 		Fields:       map[string]string{"body": "hello"},
 	}
 
@@ -44,7 +44,7 @@ func TestPostgresStore_DepositClaimRoundtrip(t *testing.T) {
 		t.Fatalf("Deposit: %v", err)
 	}
 
-	got, err := s.Claim(ctx, "pg-run-1", "request")
+	got, err := s.Claim(ctx, "pg-run-1", "webhook")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestPostgresStore_ClaimMissing(t *testing.T) {
 	ctx := context.Background()
 	s := newPostgresStoreForTest(t)
 
-	got, err := s.Claim(ctx, "missing", "request")
+	got, err := s.Claim(ctx, "missing", "webhook")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -94,15 +94,15 @@ func TestPostgresStore_Delete(t *testing.T) {
 	ctx := context.Background()
 	s := newPostgresStoreForTest(t)
 
-	if err := s.Deposit(ctx, &domain.Message{RunID: "pg-del", ReceiverType: "request"}); err != nil {
+	if err := s.Deposit(ctx, &domain.Message{RunID: "pg-del", ReceiverType: "webhook"}); err != nil {
 		t.Fatalf("Deposit: %v", err)
 	}
 
-	if err := s.Delete(ctx, "pg-del", "request"); err != nil {
+	if err := s.Delete(ctx, "pg-del", "webhook"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	got, _ := s.Claim(ctx, "pg-del", "request")
+	got, _ := s.Claim(ctx, "pg-del", "webhook")
 	if got != nil {
 		t.Fatalf("expected nil after Delete, got %+v", got)
 	}

@@ -19,7 +19,7 @@ func TestMemoryStore_DepositClaimRoundtrip(t *testing.T) {
 
 	msg := &domain.Message{
 		RunID:        "run-1",
-		ReceiverType: "request",
+		ReceiverType: "webhook",
 		Fields:       map[string]string{"body": "hello"},
 	}
 
@@ -27,7 +27,7 @@ func TestMemoryStore_DepositClaimRoundtrip(t *testing.T) {
 		t.Fatalf("Deposit: %v", err)
 	}
 
-	got, err := s.Claim(ctx, "run-1", "request")
+	got, err := s.Claim(ctx, "run-1", "webhook")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestMemoryStore_DepositClaimRoundtrip(t *testing.T) {
 		t.Fatal("expected message, got nil")
 	}
 
-	if got.RunID != "run-1" || got.ReceiverType != "request" {
+	if got.RunID != "run-1" || got.ReceiverType != "webhook" {
 		t.Errorf("unexpected message: %+v", got)
 	}
 
@@ -49,7 +49,7 @@ func TestMemoryStore_ClaimMissing(t *testing.T) {
 	ctx := context.Background()
 	s := newMemStoreWithTTL(time.Minute)
 
-	got, err := s.Claim(ctx, "nope", "request")
+	got, err := s.Claim(ctx, "nope", "webhook")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -63,8 +63,8 @@ func TestMemoryStore_DepositOverwrite(t *testing.T) {
 	ctx := context.Background()
 	s := newMemStoreWithTTL(time.Minute)
 
-	first := &domain.Message{RunID: "r", ReceiverType: "request", Fields: map[string]string{"v": "1"}}
-	second := &domain.Message{RunID: "r", ReceiverType: "request", Fields: map[string]string{"v": "2"}}
+	first := &domain.Message{RunID: "r", ReceiverType: "webhook", Fields: map[string]string{"v": "1"}}
+	second := &domain.Message{RunID: "r", ReceiverType: "webhook", Fields: map[string]string{"v": "2"}}
 
 	if err := s.Deposit(ctx, first); err != nil {
 		t.Fatalf("Deposit first: %v", err)
@@ -74,7 +74,7 @@ func TestMemoryStore_DepositOverwrite(t *testing.T) {
 		t.Fatalf("Deposit second: %v", err)
 	}
 
-	got, _ := s.Claim(ctx, "r", "request")
+	got, _ := s.Claim(ctx, "r", "webhook")
 	if got.Fields["v"] != "2" {
 		t.Errorf("expected updated value, got %+v", got.Fields)
 	}
@@ -84,11 +84,11 @@ func TestMemoryStore_ClaimExpired(t *testing.T) {
 	ctx := context.Background()
 	s := newMemStoreWithTTL(-time.Second)
 
-	if err := s.Deposit(ctx, &domain.Message{RunID: "r", ReceiverType: "request"}); err != nil {
+	if err := s.Deposit(ctx, &domain.Message{RunID: "r", ReceiverType: "webhook"}); err != nil {
 		t.Fatalf("Deposit: %v", err)
 	}
 
-	got, err := s.Claim(ctx, "r", "request")
+	got, err := s.Claim(ctx, "r", "webhook")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -139,15 +139,15 @@ func TestMemoryStore_Delete(t *testing.T) {
 	ctx := context.Background()
 	s := newMemStoreWithTTL(time.Minute)
 
-	if err := s.Deposit(ctx, &domain.Message{RunID: "r", ReceiverType: "request"}); err != nil {
+	if err := s.Deposit(ctx, &domain.Message{RunID: "r", ReceiverType: "webhook"}); err != nil {
 		t.Fatalf("Deposit: %v", err)
 	}
 
-	if err := s.Delete(ctx, "r", "request"); err != nil {
+	if err := s.Delete(ctx, "r", "webhook"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	got, _ := s.Claim(ctx, "r", "request")
+	got, _ := s.Claim(ctx, "r", "webhook")
 	if got != nil {
 		t.Fatalf("expected nil after Delete, got %+v", got)
 	}

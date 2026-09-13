@@ -253,7 +253,7 @@ const docTemplate = `{
         },
         "/webhook/{provider}": {
             "post": {
-                "description": "Deposit messages from providers into the store",
+                "description": "Deposit messages from providers into the store. This endpoint feeds the webhook receiver: test steps that declare receiver.type: webhook poll the store until a message deposited here matches the run (msg.RunID equals the test run id), so provider callbacks complete the async step.",
                 "produces": [
                     "application/json"
                 ],

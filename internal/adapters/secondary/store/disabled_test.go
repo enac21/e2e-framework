@@ -11,13 +11,13 @@ func TestDisabledStore_NoOps(t *testing.T) {
 	ctx := context.Background()
 	s := NewDisabledStore()
 
-	msg := &domain.Message{RunID: "r", ReceiverType: "request"}
+	msg := &domain.Message{RunID: "r", ReceiverType: "webhook"}
 
 	if err := s.Deposit(ctx, msg); err != nil {
 		t.Fatalf("Deposit: %v", err)
 	}
 
-	got, err := s.Claim(ctx, "r", "request")
+	got, err := s.Claim(ctx, "r", "webhook")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestDisabledStore_NoOps(t *testing.T) {
 		t.Fatalf("Release: %v", err)
 	}
 
-	if err := s.Delete(ctx, "r", "request"); err != nil {
+	if err := s.Delete(ctx, "r", "webhook"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 

@@ -3,7 +3,7 @@ package domain
 type ReceiverType = string
 
 const (
-	RequestReceiverType ReceiverType = "request"
+	WebhookReceiverType ReceiverType = "webhook"
 	ImapReceiverType    ReceiverType = "imap"
 	APIReceiverType     ReceiverType = "api"
 )

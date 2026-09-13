@@ -19,7 +19,7 @@ import (
 	"e2e-framework/internal/adapters/secondary/receiver"
 	receiverapi "e2e-framework/internal/adapters/secondary/receiver/api"
 	"e2e-framework/internal/adapters/secondary/receiver/imap"
-	"e2e-framework/internal/adapters/secondary/receiver/request"
+	receiverwebhook "e2e-framework/internal/adapters/secondary/receiver/webhook"
 	"e2e-framework/internal/adapters/secondary/store"
 	"e2e-framework/internal/adapters/secondary/trigger"
 	"e2e-framework/internal/core/domain"
@@ -108,9 +108,9 @@ func main() {
 
 	receiverReg := receiver.NewReceiverRegistry()
 	receiverReg.Register(
-		domain.RequestReceiverType,
+		domain.WebhookReceiverType,
 		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
-			return request.NewRequestReceiver(s), nil
+			return receiverwebhook.NewWebhookReceiver(s), nil
 		},
 	)
 	receiverReg.Register(

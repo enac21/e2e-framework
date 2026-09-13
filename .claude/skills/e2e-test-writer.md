@@ -36,7 +36,7 @@ Before writing YAML, collect (ask if not provided):
    - Request body (POST/PUT/PATCH only)
    - Fields to extract from response (for use in later steps)
    - Response assertions (field, type, expected value)
-5. **Receivers** — does any step trigger an async notification? (email via IMAP, webhook via `request` type)
+5. **Receivers** — does any step trigger an async notification? (email via IMAP, webhook via `webhook` type)
 6. **Schedule** — does this run on a cron? If yes, add `on_failure.calls`
 7. **Retry** — default `attempts: 3, delay: 15s` unless user specifies otherwise
 
@@ -88,7 +88,7 @@ triggers:
         field: "json.field"
         value: "EXPECTED_VALUE"
     receivers:             # include ONLY when trigger causes async notification
-      - type: imap         # imap | request
+      - type: imap         # imap | webhook | api
         timeout: 60s
         recipient: ""      # optional: email/phone to filter by
         options:
@@ -122,7 +122,7 @@ triggers:
 
 **Fields for imap receiver assertions**: `subject`, `body`, `from`, `to`
 
-**Fields for request receiver assertions**: `from`, `body`, `headers.<name>`
+**Fields for webhook receiver assertions**: `from`, `body`, `headers.<name>`
 
 ---
 

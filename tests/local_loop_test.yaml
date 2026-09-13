@@ -23,7 +23,7 @@ triggers:
   #   extracted_from: "test_id"
 
 receivers:
-  - type: request
+  - type: webhook
     timeout: 10s
     assertions:
       - type: equals

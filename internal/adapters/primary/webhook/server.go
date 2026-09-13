@@ -31,7 +31,7 @@ func (s *Server) RegisterExtractor(path string, ext ports.Extractor) {
 
 // handleWebhook godoc
 // @Summary Receive webhook from provider
-// @Description Deposit messages from providers into the store
+// @Description Deposit messages from providers into the store. This endpoint feeds the webhook receiver: test steps that declare receiver.type: webhook poll the store until a message deposited here matches the run (msg.RunID equals the test run id), so provider callbacks complete the async step.
 // @Tags Webhooks
 // @Param provider path string true "Provider name (e.g., twilio, meta)"
 // @Produce json
