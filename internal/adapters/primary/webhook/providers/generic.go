@@ -31,7 +31,6 @@ func (e *GenericExtractor) Extract(req *http.Request) (*domain.Message, error) {
 				if raw == nil || len(strings.TrimSpace(string(raw))) == 0 {
 					fields = make(map[string]string)
 					raw = []byte{}
-					err = nil
 				} else {
 					return nil, err
 				}
