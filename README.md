@@ -338,7 +338,7 @@ description: "Description of what this test verifies"
 
 schedule: "*/5 * * * *"
 enabled: true
-async: false
+async: false          # true → POST /run returns 202 {run_id, status:"running"} immediately and test continues in background (useful with wait_for_receivers). See [Async Mode](#async-mode-asynctrue)
 
 variables:
   base_url: "{{env.BASE_URL}}"
@@ -409,6 +409,8 @@ on_failure:
 ```
 
 > For tests that need multiple HTTP calls in order (e.g., create then verify), add more items to the `triggers` list. Each trigger can have its own receivers and a `wait_for_receivers` flag
+
+**`wait_for_receivers` vs `async`:** `wait_for_receivers: true` makes the orchestrator block that step until all its `receivers` complete (`timeout` per receiver, 1s polling for `webhook`) and their `assertions` pass; `false` only fires the `trigger` and moves to the next without waiting. It is independent of `async: true` — with `async: true` `POST /run` returns `202 {run_id, status:"running"}` **immediately** even if the step has `wait_for_receivers: true`; the `wait` still happens in background and you poll `GET /results/{run_id}` until `passed/failed/error`. Ideal for webhooks with long `timeout`.
 
 Each trigger may also declare a `type` (defaults to `http`) and an `options` map. `http` is the only trigger type bundled; its factory receives the shared `response_assertions` registry and currently ignores trigger-level `options` (they are passed to the factory and reserved for future trigger implementations). Triggers are built through a `TriggerRegistry` following the same factory pattern as receivers, so adding a new trigger type means registering a new factory in `main.go` and referencing it per-step (`type: my_type`).
 
@@ -842,6 +844,71 @@ receivers:
 
 For webhook-based receivers (e.g., `webhook`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
 
+### Webhook Receiver (`type: webhook`)
+
+The webhook receiver lets any external provider signal a test run without writing Go code.
+It works with two components:
+
+1. **Ingestion** — the provider (or the app under test) POSTs to
+   `{{WEBHOOK_BASE_URL}}/webhook/generic` with the run_id in a query param (`?run_id=`),
+   header (`X-E2E-Run-ID`), or body field (`run_id`). 
+   
+   The server captures the full request — headers, query params, body and deposits it into the store.
+
+2. **Collection** — the receiver polls the store (`Claim(runID, "webhook")`) every 1s
+   within the configured `timeout` budget, then runs `assertions` against the captured
+   fields.
+
+**Available fields for assertions:**
+
+| Source | Field path | Example |
+|---|---|---|
+| Request headers | `headers.<name>` (lowercase) | `headers.x-provider`, `headers.content-type` |
+| Query params | `query.<name>` (lowercase) | `query.status`, `query.lang` |
+| JSON body | `body.<path>` (lowercase, dot notation) | `body.data.order_id`, `body.status` (bare `data.order_id` also available for backward compat) |
+| Form body | `body.<field_name>` (lowercase) | `body.body`, `body.from`, `body.phone` (bare `from` also available) |
+| HTTP method | `method` | `POST` |
+
+**Run ID resolution order:**
+
+1. Query param `?run_id=<value>`
+2. Header `X-E2E-Run-ID: <value>`
+3. Body field `run_id` or `runid`
+4. No match → 400
+
+**Example:**
+
+```yaml
+triggers:
+  - method: POST
+    url: "{{env.app_base_url}}/api/orders"
+    body:
+      product_id: "sku-42"
+    receivers:
+      - type: webhook
+        timeout: 60s
+        assertions:
+          - type: contains
+            field: headers.x-provider
+            value: "acme"
+          - type: equals
+            field: query.status
+            value: "confirmed"
+          - type: contains
+            field: name
+            value: test
+    wait_for_receivers: true
+```
+
+The app must callback to:
+`POST {{WEBHOOK_BASE_URL}}/webhook/generic?run_id={{run_id}}`
+
+> **Tip `async` + `wait_for_receivers`:** if the webhook has a long `timeout`, set `async: true` at the test level. `POST /run` will return `202 {run_id, status:"running"}` instantly even if the trigger has `wait_for_receivers: true`; the `wait` continues in background and you poll `GET /results/{run_id}`. See [Async Mode](#async-mode-asynctrue).
+
+For providers that embed the correlation token in a nested JSON path, write a custom
+extractor and register it in `main.go` under a provider-specific path
+(e.g. `POST /webhook/provider_name`). Actual valid ones: twilio, meta & generic
+
 ### API Receiver (`type: api`)
 
 There are **two** "API receiver" flows:
@@ -931,6 +998,27 @@ retry:
 On each attempt the orchestrator re-creates the receivers, re-fires the trigger and re-collects. If any attempt passes completely, the test is marked as `passed` and no further attempts are made. The `on_failure.calls` notifications (if configured) are only executed **once**, after all attempts are exhausted.
 
 > **Note:** Configuration errors (e.g., an unknown receiver `type`) abort immediately and are never retried, since they will not resolve on their own.
+
+### Async Mode (`async: true`)
+
+`async` is at test level, `wait_for_receivers` at trigger level — they are orthogonal:
+
+```yaml
+async: true          # test does not block POST /run
+triggers:
+  - method: POST
+    url: "{{env.app_base_url}}/orders"
+    body: { product_id: "sku-42", message_id: "{{run_id}}" }
+    receivers:
+      - type: webhook
+        timeout: 60s
+    wait_for_receivers: true  # still waits for webhook in background
+```
+
+* `async: false` (default): `POST /run?id={id}` blocks until all `triggers` (plus their `wait_for_receivers`) finish and returns `200` with the full `TestResult` (`passed/failed/error`).
+* `async: true`: `POST /run?id={id}` returns immediately `202 {"run_id":"<uuid>","status":"running"}` and the test continues in background respecting each `wait_for_receivers` and `timeout`. Poll progress with `GET /results/{run_id}` until final state. Essential for webhooks with long `timeout` to avoid holding the HTTP connection open.
+
+`POST /run-sequence` is always synchronous today and returns `200 [TestResult]` at the end; for async flows use `POST /run` per test.
 
 ---
 

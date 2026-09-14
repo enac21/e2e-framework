@@ -1,0 +1,30 @@
+# Example test: generic webhook receiver (no provider-specific extractor).
+# The app under test should POST to /webhook/ingest with the run ID.
+version: "1"
+id: example_generic_webhook
+description: "Demo of the generic webhook receiver with field assertions."
+enabled: true
+
+async: true
+
+triggers:
+  - method: POST
+    url: "http://localhost:8080/productos"
+    body:
+      nombre: "sku-42"
+      descripcion: "A generic product description"
+      precio: 100.0
+    receivers:
+      - type: webhook
+        timeout: 60s
+        assertions:
+          - type: contains
+            field: headers.x-provider
+            value: "acme"
+          - type: equals
+            field: query.status
+            value: "confirmed"
+          - type: contains
+            field: name
+            value: "sku-42"
+    wait_for_receivers: true

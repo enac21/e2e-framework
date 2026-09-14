@@ -33,7 +33,7 @@ func extractJSON(req *http.Request) (map[string]string, []byte, error) {
 
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, nil, fmt.Errorf("%w: failed to parse JSON payload: %v", domain.ErrValidation, err)
+		return nil, raw, fmt.Errorf("%w: failed to parse JSON payload: %v", domain.ErrValidation, err)
 	}
 
 	fields := flattenMap("", payload)

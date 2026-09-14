@@ -13,6 +13,7 @@ import (
 	"e2e-framework/internal/adapters/primary/api"
 	"e2e-framework/internal/adapters/primary/cron"
 	"e2e-framework/internal/adapters/primary/webhook"
+	webhookproviders "e2e-framework/internal/adapters/primary/webhook/providers"
 	receiverasserts "e2e-framework/internal/adapters/secondary/assertions/receiver"
 	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/adapters/secondary/notifier"
@@ -76,6 +77,7 @@ func main() {
 		log.Fatalf("failed to create store: %v", err)
 	}
 	defer s.Close()
+	log.Printf("Store initialized with type: %s", cfg.Store.Type)
 
 	triggerAssertionReg := triggerasserts.NewTriggerAssertionRegistry()
 	triggerAssertionReg.Register("equals", triggerasserts.NewEqualsAssertion)
@@ -150,8 +152,10 @@ func main() {
 	}, orchestrator, tests)
 
 	whServer := webhook.NewServer(s)
-	whServer.RegisterExtractor("twilio", webhook.NewTwilioExtractor())
-	whServer.RegisterExtractor("meta", webhook.NewMetaExtractor())
+	whServer.RegisterExtractor("twilio", webhookproviders.NewTwilioExtractor())
+	whServer.RegisterExtractor("meta", webhookproviders.NewMetaExtractor())
+	whServer.RegisterExtractor("generic", webhookproviders.NewGenericExtractor())
+
 	whServer.RegisterRoutes(apiServer.Mux())
 
 	scheduler := cron.NewScheduler(orchestrator)

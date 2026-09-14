@@ -247,9 +247,13 @@ paths:
       - Tests
   /webhook/{provider}:
     post:
-      description: Deposit messages from providers into the store. This endpoint feeds the webhook receiver: test steps that declare receiver.type: webhook poll the store until a message deposited here matches the run (msg.RunID equals the test run id), so provider callbacks complete the async step.
+      description: 'Deposit messages from providers into the store. This endpoint
+        feeds the webhook receiver: test steps that declare receiver.type: webhook
+        poll the store until a message deposited here matches the run (msg.RunID equals
+        the test run id), so provider callbacks complete the async step.'
       parameters:
-      - description: Provider name (e.g., twilio, meta)
+      - description: Provider name (e.g., twilio, meta, generic (for non-specific
+          providers)
         in: path
         name: provider
         required: true

@@ -92,6 +92,12 @@ receivers:
 No other files need to be modified. The orchestrator discovers receivers
 by their registered type string.
 
+**Providers that do not need a custom extractor** can POST directly to the generic
+ingest endpoint (`POST /webhook/ingest`) with the run ID in a query param, header, or
+body field. Full request data (headers, query params, body) is captured as Fields
+available for receiver assertions. See `README.md#webhook-receiver-type-webhook` for
+details.
+
 ---
 
 ## Adding a New Store Backend

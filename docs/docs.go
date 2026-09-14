@@ -264,7 +264,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Provider name (e.g., twilio, meta)",
+                        "description": "Provider name (e.g., twilio, meta, generic (for non-specific providers)",
                         "name": "provider",
                         "in": "path",
                         "required": true
