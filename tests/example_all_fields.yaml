@@ -94,25 +94,39 @@ triggers: # sequential steps; [] → StatusPassed (no work)
         field: quantity
         value: "10"
     receivers: # [] + wait_for_receivers:false → fire-and-forget
+      # Receiver assertions run against the collected domain.Message Fields (see README "Receiver Assertions").
+      # For webhook: headers.* / query.* / body.* / method (generic.go:49). For api/imap: flattened body.
       - type: webhook # webhook|imap|api — unknown → ErrConfiguration (receiver/registry.go:31)
         timeout: 60s # default 0 → no timeout (poll forever); webhook polls 1s (receiver/webhook/receiver.go:34)
         recipient: "" # default "" → skip Reserve; else Reserve channel+recipient 1h TTL
         # options: {} # imap: host/port required, mailbox default INBOX, tls false; webhook: ignored
         assertions: # receiver registry — 5 types: contains/equals/matches/present/not_contains (receiver/assertion_registry.go:26)
-          - type: contains
+          - type: contains # headers.* lowercased
             field: headers.x-provider
             value: "acme"
-          - type: equals
+          - type: equals # query.* lowercased
             field: query.status
             value: "confirmed"
-          - type: contains
-            field: body.data.order_id # flattened JSON body fields
-            value: "order"
           - type: present
+            field: query.lang
+          - type: contains # body.* flattened JSON (lowercased dot paths)
+            field: body.data.order_id
+            value: "order"
+          - type: equals
             field: body.status
+            value: "paid"
+          - type: not_contains
+            field: body.error
+            value: "failed"
           - type: matches
+            field: body.data.created_at
+            value: ".*"
+          - type: equals # method of the callback that hit /webhook/generic
             field: method
             value: "POST"
+          - type: contains # variable substitution in value
+            field: body.message_id
+            value: "{{run_id}}"
       - type: imap # requires options
         timeout: 60s
         recipient: "qa@company.com" # Reserve example
@@ -143,10 +157,18 @@ triggers: # sequential steps; [] → StatusPassed (no work)
             value: "paid"
         extract: # accepted by schema but NOT merged back into run variables yet (planned)
           payment_id: "data.payment_id"
-        assertions: # message-style, run by orchestrator after poll predicate passes (flattened response body)
+        assertions: # receiver assertions (5 types) against flattened polled body — see README "Receiver Assertions"
           - type: contains
-            field: body
+            field: body.data.status
             value: "paid"
+          - type: equals
+            field: body.data.order_id
+            value: "{{item_id}}"
+          - type: present
+            field: body.data.payment_id
+          - type: not_contains
+            field: body.error
+            value: "failed"
     wait_for_receivers: true # default false — true → orchestrator collects in parallel until timeout
 
   # ── Trigger 2: verify + delay_before + URL interpolation ─────────────

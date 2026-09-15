@@ -735,6 +735,84 @@ This creates variables `{{user_id}}`, `{{full_name}}`, and `{{org_slug}}` that c
 
 > **Example:** `tests/crud_productos.yaml` + `tests/crear_y_verificar_producto.yaml` — `extract: {id: "id"}` then `GET /productos/{{id}}`; `tests/example_all_fields.yaml` — every `extract` path + case-insensitivity annotated.
 
+### Retry Logic
+
+By default, a test runs once and is marked as failed if any receiver times out or any assertion does not pass. For flaky or eventually-consistent systems, you can configure automatic retries using the `retry` block:
+
+```yaml
+retry:
+  enabled: true
+  attempts: 3
+  delay: 5s
+```
+
+- `attempts` — total number of executions (initial + retries). `attempts: 3` means the framework will try up to 3 times before giving up.
+- `delay` — how long to wait between attempts. Use standard Go duration strings (`5s`, `1m`, `500ms`).
+
+On each attempt the orchestrator re-creates the receivers, re-fires the trigger and re-collects. If any attempt passes completely, the test is marked as `passed` and no further attempts are made. The `on_failure.calls` notifications (if configured) are only executed **once**, after all attempts are exhausted.
+
+> **Note:** Configuration errors (e.g., an unknown receiver `type`) abort immediately and are never retried, since they will not resolve on their own.
+
+> **Example:** `tests/local_loop_test.yaml` — `retry: {enabled:true, attempts:3, delay:5s}`; `tests/crud_productos.yaml` + `tests/crear_y_verificar_producto.yaml` — `attempts:2`; `tests/example_all_fields.yaml` — `retry` defaults annotated.
+
+### Async Mode (`async: true`)
+
+`async` is at test level, `wait_for_receivers` at trigger level — they are orthogonal:
+
+```yaml
+async: true          # test does not block POST /run
+triggers:
+  - method: POST
+    url: "{{env.app_base_url}}/orders"
+    body: { product_id: "sku-42", message_id: "{{run_id}}" }
+    receivers:
+      - type: webhook
+        timeout: 60s
+    wait_for_receivers: true  # still waits for webhook in background
+```
+
+* `async: false` (default): `POST /run?id={id}` blocks until all `triggers` (plus their `wait_for_receivers`) finish and returns `200` with the full `TestResult` (`passed/failed/error`).
+* `async: true`: `POST /run?id={id}` returns immediately `202 {"run_id":"<uuid>","status":"running"}` and the test continues in background respecting each `wait_for_receivers` and `timeout`. Poll progress with `GET /results/{run_id}` until final state. Essential for webhooks with long `timeout` to avoid holding the HTTP connection open.
+
+`POST /run-sequence` is always synchronous today and returns `200 [TestResult]` at the end; for async flows use `POST /run` per test.
+
+> **Example:** `tests/example_generic_webhook.yaml` — `async: true` with `wait_for_receivers: true`; `tests/manual_imap_test.yaml` — `async: true` IMAP long poll; `tests/example_all_fields.yaml` — `async: false` default annotated.
+
+---
+
+### Step Delay
+
+Use `delay_before` on any trigger step to pause execution for a fixed duration before that step fires. Useful when an upstream service processes events asynchronously and the verify step needs to wait for propagation.
+
+```yaml
+triggers:
+  # Step 1: Create resource via async service
+  - method: POST
+    url: "{{env.BASE_URL}}/v1/test/notifications"
+    headers:
+      Authorization: "Bearer {{env.BASE_TOKEN}}"
+    body:
+      user_id: "abc-123"
+    extract:
+      notification_id: "id"
+
+  # Step 2: Wait 3s for async processing, then verify
+  - method: GET
+    url: "{{env.BASE_URL_2}}/v1/abc-123/notifications/{{notification_id}}"
+    delay_before: 3s
+    expected_status: 200
+    headers:
+      Authorization: "Bearer {{env.BASE_2_TOKEN}}"
+```
+
+**Rules:**
+- `delay_before` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
+- The delay runs **once per step** — before the first attempt. Retries do not repeat the delay (they use `retry.delay` instead).
+- Omitting `delay_before` (or setting it to `0`) skips the delay entirely.
+- The delay is logged: `[run-id] step N waiting Xs before execution`.
+
+> **Example:** `tests/example_all_fields.yaml` — `delay_before: 3s` on the verification `GET` step (step 2).
+
 ### Status Code Assertions
 
 By default, any HTTP 4xx or 5xx response from a trigger causes the test step to fail immediately. Use `expected_status` to explicitly assert that a specific status code is returned — this is required for error-path tests where a 4xx response is the correct outcome.
@@ -871,38 +949,189 @@ triggers:
 
 > **Example:** `tests/example_increment_int_assertions.yaml` — `present` + `int_gt/gte/lte/eq` on `id`; `tests/example_all_fields.yaml` — all 13 `response_assertions` types in one file.
 
-### Step Delay
+### Receiver Assertions (`assertions`)
 
-Use `delay_before` on any trigger step to pause execution for a fixed duration before that step fires. Useful when an upstream service processes events asynchronously and the verify step needs to wait for propagation.
+`assertions` run **after** a receiver's `Collect` returns a `domain.Message` (`internal/core/services/orchestrator.go:373`). They validate the **collected message `Fields`**, not the trigger response — `field`/`value` are templatized with the current run vars (`internal/core/services/orchestrator.go:374`).
+
+Only these **5 types** are registered (`internal/adapters/secondary/assertions/receiver/*.go`, wired in `cmd/server/main.go:104`):
+
+| Type | Passes when (`msg.Fields[field]` vs `value`) | File |
+|---|---|---|
+| `equals` | `actual == value` | `assertion_equals.go` |
+| `contains` | `strings.Contains(actual, value)` | `assertion_contains.go` |
+| `not_contains` | `!strings.Contains(actual, value)` | `assertion_not_contains.go` |
+| `present` | field exists and `actual != ""` | `assertion_present.go` |
+| `matches` | `regexp.MatchString(value, actual)` | `assertion_matches.go` |
+
+All other types (`array_contains`, `map_contains`, `length`, `int_eq/gt/gte/lt/lte`) belong to `response_assertions` only (`internal/adapters/secondary/assertions/trigger:46`, 13 types) and are documented in [Response Assertions](#response-assertions) — they do **not** exist for `receivers[].assertions`.
+
+**Field namespaces** — `field` is a plain `Fields[field]` lookup lowercased at ingestion (`httputil/payload.go:66`, `providers/generic.go:54`):
+
+| Receiver | `field` examples | Populated by |
+|---|---|---|
+| `webhook` | `headers.x-provider`, `headers.content-type`, `query.status`, `body.data.order_id`, `body.status`, `method` | `providers/generic.go:49-61` — `headers.<name>` from `req.Header`, `query.<name>` from `req.URL.Query()`, `body.<path>` flattened JSON via `ExtractFields`/`FlattenJSON` (bare `data.order_id` also kept at `generic.go:50`), form `body.<field>` via `ParseForm`, `method` from `req.Method` |
+| `api` | `body.data.status`, `body.data.order_id`, `headers.content-type` | `receiver/api/receiver.go:174-197` — flattened polled response body (lowercased dot paths); prefer `body.*` |
+| `imap` | `subject`, `body`, `from`, `to` | `receiver/imap` — parsed email fields |
+
+Use **lowercase** in `field` (`headers.x-provider` not `headers.X-Provider`).
+
+### Receiver Options
+
+Some receivers (like `imap`) require connection-specific configuration that can vary per test. Use the `options` block inside the receiver definition to pass any key-value configuration. These options are passed directly to the receiver factory, so each test can target a different server:
+
+```yaml
+receivers:
+  - type: imap
+    timeout: 60s
+    options:
+      host: imap.company.com
+      port: "993"
+      username: qa@company.com
+      password: secret
+      mailbox: INBOX
+      tls: "true"
+```
+
+For webhook-based receivers (e.g., `webhook`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
+
+> **Example:** `tests/manual_imap_test.yaml` + `tests/example_welcome_email.yaml` — full `options: {host, port, username, password, mailbox, tls}`; `tests/example_all_fields.yaml` — `imap` + `webhook`/`api` options side-by-side.
+
+### Webhook Receiver (`type: webhook`)
+
+The webhook receiver lets any external provider signal a test run without writing Go code.
+It works with two components:
+
+1. **Ingestion** — the provider (or the app under test) POSTs to
+   `{{WEBHOOK_BASE_URL}}/webhook/generic` with the run_id in a query param (`?run_id=`),
+   header (`X-E2E-Run-ID`), or body field (`run_id`). 
+   
+   The server captures the full request — headers, query params, body and deposits it into the store.
+
+2. **Collection** — the receiver polls the store (`Claim(runID, "webhook")`) every 1s
+   within the configured `timeout` budget, then runs `assertions` against the captured
+   fields.
+
+All assertion field namespaces and types are documented centrally in [Receiver Assertions](#receiver-assertions-assertions).
+
+**Run ID resolution order:**
+
+1. Query param `?run_id=<value>`
+2. Header `X-E2E-Run-ID: <value>`
+3. Body field `run_id` or `runid`
+4. No match → 400
+
+**Example — minimal (`headers` / `query` / `body`):**
 
 ```yaml
 triggers:
-  # Step 1: Create resource via async service
   - method: POST
-    url: "{{env.BASE_URL}}/v1/test/notifications"
-    headers:
-      Authorization: "Bearer {{env.BASE_TOKEN}}"
+    url: "{{env.app_base_url}}/api/orders"
     body:
-      user_id: "abc-123"
-    extract:
-      notification_id: "id"
-
-  # Step 2: Wait 3s for async processing, then verify
-  - method: GET
-    url: "{{env.BASE_URL_2}}/v1/abc-123/notifications/{{notification_id}}"
-    delay_before: 3s
-    expected_status: 200
-    headers:
-      Authorization: "Bearer {{env.BASE_2_TOKEN}}"
+      product_id: "sku-42"
+      message_id: "{{run_id}}"
+    receivers:
+      - type: webhook
+        timeout: 60s
+        assertions:
+          - type: equals
+            field: headers.x-provider
+            value: "acme"
+          - type: equals
+            field: query.status
+            value: "confirmed"
+          - type: contains
+            field: body.message_id
+            value: "{{run_id}}"
+    wait_for_receivers: true
 ```
 
-**Rules:**
-- `delay_before` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
-- The delay runs **once per step** — before the first attempt. Retries do not repeat the delay (they use `retry.delay` instead).
-- Omitting `delay_before` (or setting it to `0`) skips the delay entirely.
-- The delay is logged: `[run-id] step N waiting Xs before execution`.
+The app must callback to:
 
-> **Example:** `tests/example_all_fields.yaml` — `delay_before: 3s` on the verification `GET` step (step 2).
+`POST {{WEBHOOK_BASE_URL}}/webhook/generic?run_id={{run_id}}`
+
+For the full field reference (`headers.*` / `query.*` / `body.*` / `method`) and the 5 assertion types see [Receiver Assertions](#receiver-assertions-assertions).
+
+> **Tip `async` + `wait_for_receivers`:** if the webhook has a long `timeout`, set `async: true` at the test level. `POST /run` will return `202 {run_id, status:"running"}` instantly even if the trigger has `wait_for_receivers: true`; the `wait` continues in background and you poll `GET /results/{run_id}`. See [Async Mode](#async-mode-asynctrue).
+
+> **Example:** `tests/example_generic_webhook.yaml` — `type: webhook` with `headers.x-provider`/`query.status`/`body` assertions; `tests/local_loop_test.yaml` — self-contained loop via `POST /webhook/twilio`; `tests/example_all_fields.yaml` — all webhook field paths.
+
+For providers that embed the correlation token in a nested JSON path, write a custom
+extractor and register it in `main.go` under a provider-specific path
+(e.g. `POST /webhook/provider_name`). Actual valid ones: twilio, meta & generic
+
+### API Receiver (`type: api`)
+
+There are **two** "API receiver" flows:
+
+| Flow | Type | Semantics |
+|------|------|-----------|
+| **Webhook / home-delivered** | `webhook` (existing) | A provider pushes a message to the webhook server; the receiver polls the store until it arrives or times out. |
+| **Outbound polling** | `api` (new) | The receiver **makes the HTTP call itself**, repeatedly, until the response satisfies the predicate or the budget (`timeout`) expires. |
+
+The `type: api` receiver behaves like a **trigger that polls**: every `interval`
+it executes an HTTP request and succeeds when `expected_status` and the
+trigger-style `response_assertions` both pass. Failures are **transient** — only
+the `timeout` fails the run, so it composes naturally on an eventual-consistency
+verification step.
+
+```yaml
+triggers:
+  - method: POST
+    url: "{{env.orders_api}}/checkout"
+    body: { order_id: "{{order_id}}" }
+    receivers:
+      - type: api
+        interval: 5s
+        timeout: 60s
+        method: GET
+        url: "{{env.orders_api}}/orders/{{order_id}}"
+        headers:
+          Authorization: "Bearer {{env.API_TOKEN}}"
+        expected_status: 200
+        response_assertions:              # poll predicate — retried until timeout
+          - type: equals
+            field: data.status
+            value: "paid"
+        assertions:                        # receiver assertions — run once after predicate passes
+          - type: equals
+            field: body.data.order_id
+            value: "{{order_id}}"
+          - type: contains
+            field: body.data.status
+            value: "paid"
+    wait_for_receivers: true
+```
+
+> **Poll vs receive:** `response_assertions` decide *when to stop polling* (retried); `assertions` decide *whether the final message is correct* (failed once). Field namespaces and the 5 receiver assertion types are documented in [Receiver Assertions](#receiver-assertions-assertions).
+
+**Fields:**
+
+- `interval` — how often to poll (Go duration, e.g. `5s`). Default `5s`.
+- `timeout` — overall budget for polling; after it, the receiver returns
+  `ErrTimeout` and the test fails. Required unless you want the run's own
+  deadline to govern.
+- `method` (default `GET`), `url` (required), `headers`, `body` — the polled
+  request. `body` is serialized as JSON unless `Content-Type:
+  application/x-www-form-urlencoded` is set (same rules as triggers).
+- `expected_status` — when set (> 0), the attempt passes **only** if the status
+  matches exactly; when unset, any 2xx/3xx passes and 4xx/5xx is a transient
+  failure.
+- `response_assertions` — the trigger assertion types (`equals`, `contains`,
+  `present`, `array_contains`, `int_gt`, …) evaluated against the flattened
+  JSON body of **each** poll. Values support `{{variable}}` substitution.
+- `{{variable}}` substitution works in `url`, `headers`, `body` and assertion
+  values — the receiver receives the full run variables (from `variables:`,
+  prior triggers' `extract`, and `run_id`).
+- `extract` — accepted by the schema but **not** yet merged back into run
+  variables (planned separately).
+- `assertions` — message-style assertions run by the orchestrator **after** the
+  polling predicate passes, against the flattened response body.
+
+On success the receiver returns the response as a `domain.Message` (`Headers`,
+`Fields` flattened from the JSON body, `Raw` body), so message-style `assertions`
+keep working as with any other receiver.
+
+> **Example:** `tests/example_api_polling.yaml` — `type: api` polling every `5s` until `response_assertions` pass; `tests/example_all_fields.yaml` — `api` + `webhook` receivers in the same trigger.
 
 ### on_failure Block
 
@@ -951,213 +1180,6 @@ Each call supports the same core fields as a trigger: `method` (default `POST`),
 - If no call is configured, nothing happens.
 
 > **Example:** `tests/example_welcome_email.yaml` — two `on_failure.calls` (alerts + Slack) with `{{test_id}}/{{run_id}}/{{error}}`; `tests/example_all_fields.yaml` — every `CallAction` field + `{{uuid()}}` in body annotated.
-
-### Receiver Options
-
-Some receivers (like `imap`) require connection-specific configuration that can vary per test. Use the `options` block inside the receiver definition to pass any key-value configuration. These options are passed directly to the receiver factory, so each test can target a different server:
-
-```yaml
-receivers:
-  - type: imap
-    timeout: 60s
-    options:
-      host: imap.company.com
-      port: "993"
-      username: qa@company.com
-      password: secret
-      mailbox: INBOX
-      tls: "true"
-```
-
-For webhook-based receivers (e.g., `webhook`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
-
-> **Example:** `tests/manual_imap_test.yaml` + `tests/example_welcome_email.yaml` — full `options: {host, port, username, password, mailbox, tls}`; `tests/example_all_fields.yaml` — `imap` + `webhook`/`api` options side-by-side.
-
-### Webhook Receiver (`type: webhook`)
-
-The webhook receiver lets any external provider signal a test run without writing Go code.
-It works with two components:
-
-1. **Ingestion** — the provider (or the app under test) POSTs to
-   `{{WEBHOOK_BASE_URL}}/webhook/generic` with the run_id in a query param (`?run_id=`),
-   header (`X-E2E-Run-ID`), or body field (`run_id`). 
-   
-   The server captures the full request — headers, query params, body and deposits it into the store.
-
-2. **Collection** — the receiver polls the store (`Claim(runID, "webhook")`) every 1s
-   within the configured `timeout` budget, then runs `assertions` against the captured
-   fields.
-
-**Available fields for assertions:**
-
-| Source | Field path | Example |
-|---|---|---|
-| Request headers | `headers.<name>` (lowercase) | `headers.x-provider`, `headers.content-type` |
-| Query params | `query.<name>` (lowercase) | `query.status`, `query.lang` |
-| JSON body | `body.<path>` (lowercase, dot notation) | `body.data.order_id`, `body.status` (bare `data.order_id` also available for backward compat) |
-| Form body | `body.<field_name>` (lowercase) | `body.body`, `body.from`, `body.phone` (bare `from` also available) |
-| HTTP method | `method` | `POST` |
-
-**Run ID resolution order:**
-
-1. Query param `?run_id=<value>`
-2. Header `X-E2E-Run-ID: <value>`
-3. Body field `run_id` or `runid`
-4. No match → 400
-
-**Example:**
-
-```yaml
-triggers:
-  - method: POST
-    url: "{{env.app_base_url}}/api/orders"
-    body:
-      product_id: "sku-42"
-    receivers:
-      - type: webhook
-        timeout: 60s
-        assertions:
-          - type: contains
-            field: headers.x-provider
-            value: "acme"
-          - type: equals
-            field: query.status
-            value: "confirmed"
-          - type: contains
-            field: name
-            value: test
-    wait_for_receivers: true
-```
-
-The app must callback to:
-`POST {{WEBHOOK_BASE_URL}}/webhook/generic?run_id={{run_id}}`
-
-> **Tip `async` + `wait_for_receivers`:** if the webhook has a long `timeout`, set `async: true` at the test level. `POST /run` will return `202 {run_id, status:"running"}` instantly even if the trigger has `wait_for_receivers: true`; the `wait` continues in background and you poll `GET /results/{run_id}`. See [Async Mode](#async-mode-asynctrue).
-
-> **Example:** `tests/example_generic_webhook.yaml` — `type: webhook` with `headers.x-provider`/`query.status`/`body` assertions; `tests/local_loop_test.yaml` — self-contained loop via `POST /webhook/twilio`; `tests/example_all_fields.yaml` — all webhook field paths.
-
-For providers that embed the correlation token in a nested JSON path, write a custom
-extractor and register it in `main.go` under a provider-specific path
-(e.g. `POST /webhook/provider_name`). Actual valid ones: twilio, meta & generic
-
-### API Receiver (`type: api`)
-
-There are **two** "API receiver" flows:
-
-| Flow | Type | Semantics |
-|------|------|-----------|
-| **Webhook / home-delivered** | `webhook` (existing) | A provider pushes a message to the webhook server; the receiver polls the store until it arrives or times out. |
-| **Outbound polling** | `api` (new) | The receiver **makes the HTTP call itself**, repeatedly, until the response satisfies the predicate or the budget (`timeout`) expires. |
-
-The `type: api` receiver behaves like a **trigger that polls**: every `interval`
-it executes an HTTP request and succeeds when `expected_status` and the
-trigger-style `response_assertions` both pass. Failures are **transient** — only
-the `timeout` fails the run, so it composes naturally on an eventual-consistency
-verification step.
-
-```yaml
-triggers:
-  - method: POST
-    url: "{{env.orders_api}}/checkout"
-    body:
-      order_id: "{{order_id}}"
-    receivers:
-      - type: api
-        interval: 5s          # polling cadence (default 5s)
-        timeout: 60s          # overall polling budget
-        # trigger-like fields:
-        method: GET
-        url: "{{env.orders_api}}/orders/{{order_id}}"
-        headers:
-          Authorization: "Bearer {{env.API_TOKEN}}"
-        expected_status: 200
-        response_assertions:
-          - type: equals
-            field: data.status
-            value: "paid"
-        extract:
-          payment_id: "data.payment_id"
-        # optional message-style assertions on the flattened response
-        assertions:
-          - type: contains
-            field: body
-            value: "paid"
-    wait_for_receivers: true
-```
-
-**Fields:**
-
-- `interval` — how often to poll (Go duration, e.g. `5s`). Default `5s`.
-- `timeout` — overall budget for polling; after it, the receiver returns
-  `ErrTimeout` and the test fails. Required unless you want the run's own
-  deadline to govern.
-- `method` (default `GET`), `url` (required), `headers`, `body` — the polled
-  request. `body` is serialized as JSON unless `Content-Type:
-  application/x-www-form-urlencoded` is set (same rules as triggers).
-- `expected_status` — when set (> 0), the attempt passes **only** if the status
-  matches exactly; when unset, any 2xx/3xx passes and 4xx/5xx is a transient
-  failure.
-- `response_assertions` — the trigger assertion types (`equals`, `contains`,
-  `present`, `array_contains`, `int_gt`, …) evaluated against the flattened
-  JSON body of **each** poll. Values support `{{variable}}` substitution.
-- `{{variable}}` substitution works in `url`, `headers`, `body` and assertion
-  values — the receiver receives the full run variables (from `variables:`,
-  prior triggers' `extract`, and `run_id`).
-- `extract` — accepted by the schema but **not** yet merged back into run
-  variables (planned separately).
-- `assertions` — message-style assertions run by the orchestrator **after** the
-  polling predicate passes, against the flattened response body.
-
-On success the receiver returns the response as a `domain.Message` (`Headers`,
-`Fields` flattened from the JSON body, `Raw` body), so message-style `assertions`
-keep working as with any other receiver.
-
-> **Example:** `tests/example_api_polling.yaml` — `type: api` polling every `5s` until `response_assertions` pass; `tests/example_all_fields.yaml` — `api` + `webhook` receivers in the same trigger.
-
-### Retry Logic
-
-By default, a test runs once and is marked as failed if any receiver times out or any assertion does not pass. For flaky or eventually-consistent systems, you can configure automatic retries using the `retry` block:
-
-```yaml
-retry:
-  enabled: true
-  attempts: 3
-  delay: 5s
-```
-
-- `attempts` — total number of executions (initial + retries). `attempts: 3` means the framework will try up to 3 times before giving up.
-- `delay` — how long to wait between attempts. Use standard Go duration strings (`5s`, `1m`, `500ms`).
-
-On each attempt the orchestrator re-creates the receivers, re-fires the trigger and re-collects. If any attempt passes completely, the test is marked as `passed` and no further attempts are made. The `on_failure.calls` notifications (if configured) are only executed **once**, after all attempts are exhausted.
-
-> **Note:** Configuration errors (e.g., an unknown receiver `type`) abort immediately and are never retried, since they will not resolve on their own.
-
-> **Example:** `tests/local_loop_test.yaml` — `retry: {enabled:true, attempts:3, delay:5s}`; `tests/crud_productos.yaml` + `tests/crear_y_verificar_producto.yaml` — `attempts:2`; `tests/example_all_fields.yaml` — `retry` defaults annotated.
-
-### Async Mode (`async: true`)
-
-`async` is at test level, `wait_for_receivers` at trigger level — they are orthogonal:
-
-```yaml
-async: true          # test does not block POST /run
-triggers:
-  - method: POST
-    url: "{{env.app_base_url}}/orders"
-    body: { product_id: "sku-42", message_id: "{{run_id}}" }
-    receivers:
-      - type: webhook
-        timeout: 60s
-    wait_for_receivers: true  # still waits for webhook in background
-```
-
-* `async: false` (default): `POST /run?id={id}` blocks until all `triggers` (plus their `wait_for_receivers`) finish and returns `200` with the full `TestResult` (`passed/failed/error`).
-* `async: true`: `POST /run?id={id}` returns immediately `202 {"run_id":"<uuid>","status":"running"}` and the test continues in background respecting each `wait_for_receivers` and `timeout`. Poll progress with `GET /results/{run_id}` until final state. Essential for webhooks with long `timeout` to avoid holding the HTTP connection open.
-
-`POST /run-sequence` is always synchronous today and returns `200 [TestResult]` at the end; for async flows use `POST /run` per test.
-
-> **Example:** `tests/example_generic_webhook.yaml` — `async: true` with `wait_for_receivers: true`; `tests/manual_imap_test.yaml` — `async: true` IMAP long poll; `tests/example_all_fields.yaml` — `async: false` default annotated.
-
----
 
 ## Adding a New Receiver
 
