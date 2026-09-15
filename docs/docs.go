@@ -9,16 +9,7 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "termsOfService": "http://swagger.io/terms/",
-        "contact": {
-            "name": "API Support",
-            "url": "http://www.swagger.io/support",
-            "email": "support@swagger.io"
-        },
-        "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
-        },
+        "contact": {},
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -66,6 +57,12 @@ const docTemplate = `{
                                 "$ref": "#/definitions/domain.TestResult"
                             }
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 }
             }
@@ -98,6 +95,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Run ID required",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -146,6 +149,12 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "404": {
                         "description": "Test ID not found",
                         "schema": {
@@ -161,9 +170,90 @@ const docTemplate = `{
                 }
             }
         },
+        "/run-sequence": {
+            "post": {
+                "description": "Execute an ordered list of test IDs sequentially, or run a configured test group. The body is a plain JSON array of test IDs; alternatively pass test_group as a query param to expand a configured group.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tests"
+                ],
+                "summary": "Run a sequence of tests",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Name of a configured test group to run instead of an explicit list",
+                        "name": "test_group",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Ordered list of test IDs (not used when test_group is set)",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Duration to wait between tests (e.g. '2s'). Not applied before the first test.",
+                        "name": "test_delay",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Stop the sequence after the first failed or errored test (default false)",
+                        "name": "skip_fail_test",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/domain.TestResult"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid body or parameters",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Test ID or test group not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/webhook/{provider}": {
             "post": {
-                "description": "Deposit messages from providers into the store",
+                "description": "Deposit messages from providers into the store. This endpoint feeds the webhook receiver: test steps that declare receiver.type: webhook poll the store until a message deposited here matches the run (msg.RunID equals the test run id), so provider callbacks complete the async step.",
                 "produces": [
                     "application/json"
                 ],
@@ -174,7 +264,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Provider name (e.g., github, gitlab)",
+                        "description": "Provider name (e.g., twilio, meta, generic (for non-specific providers)",
                         "name": "provider",
                         "in": "path",
                         "required": true
@@ -186,6 +276,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Error extracting message data",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -243,9 +339,8 @@ const docTemplate = `{
         "domain.ReceiverResult": {
             "type": "object",
             "properties": {
-                "durationMs": {
-                    "type": "integer",
-                    "format": "int64"
+                "duration_ms": {
+                    "type": "integer"
                 },
                 "error": {
                     "type": "string"
@@ -255,6 +350,9 @@ const docTemplate = `{
                 },
                 "status": {
                     "$ref": "#/definitions/domain.RunStatus"
+                },
+                "trigger_index": {
+                    "type": "integer"
                 },
                 "type": {
                     "type": "string"
@@ -281,14 +379,16 @@ const docTemplate = `{
         "domain.TestResult": {
             "type": "object",
             "properties": {
-                "durationMs": {
-                    "type": "integer",
-                    "format": "int64"
+                "attempts": {
+                    "type": "integer"
+                },
+                "duration_ms": {
+                    "type": "integer"
                 },
                 "error": {
                     "type": "string"
                 },
-                "finishedAt": {
+                "finished_at": {
                     "type": "string"
                 },
                 "receivers": {
@@ -297,19 +397,19 @@ const docTemplate = `{
                         "$ref": "#/definitions/domain.ReceiverResult"
                     }
                 },
-                "runID": {
+                "run_id": {
                     "type": "string"
                 },
-                "startedAt": {
+                "started_at": {
                     "type": "string"
                 },
                 "status": {
                     "$ref": "#/definitions/domain.RunStatus"
                 },
-                "testID": {
+                "test_id": {
                     "type": "string"
                 },
-                "triggerVars": {
+                "trigger_vars": {
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -323,7 +423,7 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:8080",
+	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "e2e-framework API",

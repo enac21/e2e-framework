@@ -113,7 +113,7 @@ func TestStart_ConnectError(t *testing.T) {
 	mockClient.EXPECT().Connect().Return(errors.New("dial failed"))
 
 	r := &imap.IMAPReceiver{Client: mockClient}
-	err := r.Start(context.Background(), "run-123")
+	err := r.Start(context.Background(), "run-123", nil)
 
 	if !errors.Is(err, domain.ErrInternal) {
 		t.Fatalf("expected ErrInternal, got %v", err)
@@ -127,7 +127,7 @@ func TestStart_SetsRunID(t *testing.T) {
 	mockClient.EXPECT().Connect().Return(nil)
 
 	r := &imap.IMAPReceiver{Client: mockClient}
-	err := r.Start(context.Background(), "run-abc")
+	err := r.Start(context.Background(), "run-abc", nil)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

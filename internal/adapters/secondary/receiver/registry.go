@@ -7,7 +7,7 @@ import (
 	"e2e-framework/internal/core/ports"
 )
 
-type ReceiverFactory func(options map[string]string) (ports.Receiver, error)
+type ReceiverFactory func(cfg domain.ReceiverConfig) (ports.Receiver, error)
 
 type ReceiverRegistry struct {
 	factories map[string]ReceiverFactory
@@ -23,10 +23,10 @@ func (r *ReceiverRegistry) Register(typeName string, factory ReceiverFactory) {
 	r.factories[typeName] = factory
 }
 
-func (r *ReceiverRegistry) Create(typeName string, options map[string]string) (ports.Receiver, error) {
-	if factory, ok := r.factories[typeName]; ok {
-		return factory(options)
+func (r *ReceiverRegistry) Create(cfg domain.ReceiverConfig) (ports.Receiver, error) {
+	if factory, ok := r.factories[cfg.Type]; ok {
+		return factory(cfg)
 	}
 
-	return nil, fmt.Errorf("%w: unknown receiver type: %q", domain.ErrConfiguration, typeName)
+	return nil, fmt.Errorf("%w: unknown receiver type: %q", domain.ErrConfiguration, cfg.Type)
 }

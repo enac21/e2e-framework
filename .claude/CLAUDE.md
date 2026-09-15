@@ -32,7 +32,7 @@ adapters/primary   →   core/services   →   ports   ←   adapters/secondary
 | Ports | `internal/core/ports` | Interfaces only — independent of any implementation. |
 | Services | `internal/core/services` | Orchestration (`Orchestrator`, `RunSequence`, `RunTest`...). |
 | Primary adapters | `internal/adapters/primary` | Entry points: `api`, `webhook`, `cron`. |
-| Secondary adapters | `internal/adapters/secondary` | Concrete implementations: `store` (redis), `receiver` (imap/request), `notifier`, `assertions` (receiver/trigger), `trigger` (http). |
+| Secondary adapters | `internal/adapters/secondary` | Concrete implementations: `store` (redis), `receiver` (webhook/imap/api), `notifier`, `assertions` (receiver/trigger), `trigger` (http). |
 | pkg | `internal/pkg` | Utilities without business logic (`template`, `config`, `httputil`, `errorwrapper`). |
 
 ### Strict dependency rule

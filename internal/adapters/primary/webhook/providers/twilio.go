@@ -1,36 +1,34 @@
-package webhook
+package providers
 
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
 )
 
-type MetaExtractor struct{}
+type TwilioExtractor struct{}
 
-func NewMetaExtractor() *MetaExtractor {
-	return &MetaExtractor{}
+func NewTwilioExtractor() *TwilioExtractor {
+	return &TwilioExtractor{}
 }
 
-func (e *MetaExtractor) Extract(req *http.Request) (*domain.Message, error) {
+func (e *TwilioExtractor) Extract(req *http.Request) (*domain.Message, error) {
 	fields, raw, err := httputil.ExtractFields(req)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("[Meta Webhook] Extracted fields: %v", fields)
+	log.Printf("[Twilio Webhook] Extracted fields: %v", fields)
 
-	runID := fields["messages.0.text.body"]
-	if runID == "" {
-		runID = "unknown"
-	}
+	runID := strings.TrimSpace(fields["body"])
 
 	return &domain.Message{
 		RunID:        runID,
-		ReceiverType: "push",
+		ReceiverType: domain.WebhookReceiverType,
 		ReceivedAt:   time.Now(),
 		Headers: map[string]string{
 			"content-type": req.Header.Get("Content-Type"),

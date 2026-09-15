@@ -2,9 +2,11 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 
+	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
 )
 
@@ -31,9 +33,9 @@ func (s *Server) RegisterExtractor(path string, ext ports.Extractor) {
 
 // handleWebhook godoc
 // @Summary Receive webhook from provider
-// @Description Deposit messages from providers into the store
+// @Description Deposit messages from providers into the store. This endpoint feeds the webhook receiver: test steps that declare receiver.type: webhook poll the store until a message deposited here matches the run (msg.RunID equals the test run id), so provider callbacks complete the async step.
 // @Tags Webhooks
-// @Param provider path string true "Provider name (e.g., twilio, meta)"
+// @Param provider path string true "Provider name (e.g., twilio, meta, generic (for non-specific providers)"
 // @Produce json
 // @Success 202
 // @Failure 401 {string} string "Unauthorized"
@@ -46,6 +48,11 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	provider := r.URL.Path[len("/webhook/"):]
 
+	var (
+		msg *domain.Message
+		err error
+	)
+
 	extractor, exists := s.extractors[provider]
 	if !exists {
 		http.Error(w, "unknown provider", http.StatusNotFound)
@@ -53,10 +60,13 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//TODO - Add auth middleware per provider.
-	msg, err := extractor.Extract(r)
+	msg, err = extractor.Extract(r)
 	if err != nil {
-		//TODO - Error handler in base of the domain error
+		if errors.Is(err, domain.ErrValidation) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		} else {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 
 		return
 	}

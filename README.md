@@ -1,9 +1,8 @@
 # e2e-testing-service
 
-A data-driven end-to-end testing framework written in Go. Teams define tests via YAML
+A data-driven end-to-end testing framework written in Go. Define tests via YAML
 configuration files — no code changes required. Tests trigger HTTP requests and validate
-that the expected notifications arrive through one or more channels (email, SMS, push,
-webhook, etc.).
+the responses throw trigger response asserts and receivers.
 
 ---
 
@@ -59,15 +58,132 @@ e2e-testing-service/
 ## Prerequisites
 
 - **Go 1.25**
-- **Docker & Docker Compose** (for Redis and containerized deployment)
+- **Docker & Docker Compose** (for dependencies and containerized deployment)
 
 ---
 
 ## Getting Started
 
-Follow these steps to go from clone to a running end-to-end test:
+You have **two ways** to run the service:
 
-### 1. Clone and install dependencies
+- **Option A — Published Docker image (recommended)** — pull the versioned container from `ghcr.io` and start it with your own config/tests, no Go toolchain needed.
+- **Option B — Build from source** — clone the repo and run natively.
+
+Both use the same config resolution (`{{env.VAR_NAME}}` in YAML + `CONFIG_PATH`).
+
+### Option A — Published Docker image (fastest)
+
+The service is published as a versioned, multi-arch image at `ghcr.io/enac21/e2e-framework` (see `Makefile:docker-build-multiarch`). Use `:latest` for development or pin to a version tag (e.g. `:v1.2.0`) in production.
+
+#### 1. Pull the image
+
+```bash
+docker pull ghcr.io/enac21/e2e-framework:latest
+# or a pinned version
+docker pull ghcr.io/enac21/e2e-framework:v1.2.0
+```
+
+#### 2. Create environment variables
+
+The service resolves `{{env.VAR_NAME}}` placeholders in `configs/config.yaml`
+and test YAML files at startup (before YAML parsing).
+
+Create a `.env` file (already in `.gitignore`):
+
+```dotenv
+# Store backend — only the selected backend needs its URL/DSN
+REDIS_URL=redis://redis:6379
+# POSTGRES_DSN=postgres://e2e:e2e@postgres:5432/e2e
+# STORE_TYPE=memory   # overrides store.type in YAML (redis|postgres|memory|disabled)
+
+# JWT authentication secret
+# (required even when auth.enabled: false — the loader resolves {{env.JWT_SECRET}} at startup)
+JWT_SECRET=dev-secret-change-me
+
+# Only needed for tests that use the imap / webhook receivers
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_USERNAME=you@gmail.com
+IMAP_PASSWORD=your-app-password
+WEBHOOK_BASE_URL=http://localhost:8081
+```
+
+> **Tip:** Export the variables in your shell (`source .env` won't work on
+> most shells — use `export $(grep -v '^#' .env | xargs)` or load them via
+> your IDE / compose `env_file`).
+
+#### 3. Run with Docker (custom config + custom tests)
+
+The image already contains the default `configs/config.yaml` and `tests/` from the build, but you should **mount your own** to configure the service without rebuilding:
+
+- **Config:** mount a custom YAML and point `CONFIG_PATH` at it (`cmd/server/main.go:39` defaults to `configs/config.yaml`).
+- **Tests:** mount a host directory to the path declared in `tests.path` (default `tests`).
+
+```bash
+# Single container — API on 8082 (override via server.port in your config)
+docker run --rm -p 8082:8082 --env-file .env \
+  -v $(pwd)/my-config.yaml:/app/my-config.yaml:ro \
+  -v $(pwd)/my-tests:/app/my-tests:ro \
+  -e CONFIG_PATH=/app/my-config.yaml \
+  ghcr.io/enac21/e2e-framework:latest
+
+# With docker compose — replace build: . with image:
+# docker-compose.yml
+# services:
+#   e2e-service:
+#     image: ghcr.io/enac21/e2e-framework:latest   # ← instead of build: .
+#     ports: ["8082:8082"]          # must match server.port in your config
+#     env_file: .env
+#     environment:
+#       - CONFIG_PATH=/app/my-config.yaml
+#     volumes:
+#       - ./my-config.yaml:/app/my-config.yaml:ro
+#       - ./my-tests:/app/my-tests:ro
+#     depends_on:
+#       redis: {condition: service_healthy}
+
+docker compose up -d redis          # start deps
+docker compose up -d e2e-service    # start service from published image
+```
+
+Minimal custom config example (`my-config.yaml`):
+
+```yaml
+version: "1"
+server:
+  port: 8082
+auth:
+  enabled: false
+  jwt_secret: "{{env.JWT_SECRET}}"
+store:
+  type: memory        # no external DB for local dev
+  memory: {ttl: 300s}
+tests:
+  path: "/app/my-tests"
+```
+
+> **Notes:**
+> - The image `EXPOSE`s `8080` (`Dockerfile:33`), but the actual listen port is `server.port` in your config (default `8082` in `configs/config.example.yaml`). Map the host port to match `server.port`.
+> - `CONFIG_PATH` and `STORE_TYPE` are the only env vars read directly by the binary; everything else is injected via `{{env.*}}` placeholders in YAML.
+> - Tests are loaded once at startup via `tests.path` (`cmd/server/main.go:49`); mount them read-only (`:ro`).
+
+#### 4. Verify, run a test, check results
+
+```bash
+curl http://localhost:8082/health
+# → {"status":"ok"}   # /health never requires auth
+
+curl -X POST "http://localhost:8082/run?id=local_loop_test"
+curl http://localhost:8082/results
+```
+
+---
+
+### Option B — Build from source
+
+Follow these steps to go from clone to a running end-to-end test natively.
+
+#### 1. Clone and install dependencies
 
 ```bash
 git clone https://github.com/your-org/e2e-framework.git
@@ -75,59 +191,42 @@ cd e2e-framework
 go mod download
 ```
 
-### 2. Create environment variables
+#### 2. Create environment variables
 
-The service resolves `{{env.VAR_NAME}}` placeholders in `configs/config.yaml`
-and test YAML files using OS environment variables at startup.
-
-Create a `.env` file in the project root (already in `.gitignore`):
+Same `.env` as in Option A, step A2. The service resolves `{{env.VAR_NAME}}` placeholders in `configs/config.yaml` and test YAML files using OS environment variables at startup.
 
 ```dotenv
-# Redis (required)
+# Redis (required if store.type: redis)
 REDIS_URL=redis://localhost:6379
-
-# JWT authentication secret
-# (required even when auth.enabled: false, because the config parser
-# resolves {{env.JWT_SECRET}} at load time)
 JWT_SECRET=dev-secret-change-me
-
-# IMAP credentials (only needed for tests using the imap receiver)
 IMAP_HOST=imap.gmail.com
 IMAP_PORT=993
 IMAP_USERNAME=you@gmail.com
 IMAP_PASSWORD=your-app-password
-
-# Webhook base URL (only needed for webhook-based receiver tests)
 WEBHOOK_BASE_URL=http://localhost:8081
 ```
 
-> **Tip:** Export the variables in your shell (`source .env` won't work on
-> most shells — use `export $(grep -v '^#' .env | xargs)` or load them via
-> your IDE).
+#### 3. Start dependencies
 
-### 3. Start Redis
-
-The service requires a running Redis instance. If you don't have Redis
-installed locally, use Docker:
+The service requires a running store for `webhook` receivers (or use `store.type: memory` / `disabled` for DB-less runs):
 
 ```bash
 docker run -d --name e2e-redis -p 6379:6379 redis:7-alpine
+# or for postgres: docker run -d --name e2e-pg -p 5432:5432 -e POSTGRES_USER=e2e -e POSTGRES_PASSWORD=e2e postgres:16-alpine
 ```
 
-Alternatively, `make docker-up` starts both Redis **and** the service in
-containers (see [Docker](#docker) below).
+Alternatively, `make docker-up` builds the image locally and starts both Redis **and** the service in containers.
 
-### 4. Start the server
+#### 4. Start the server
 
 ```bash
 make run
+# or: CONFIG_PATH=./my-config.yaml go run ./cmd/server
 ```
 
-This compiles the binary (`bin/e2e-testing-service`) and starts it. The API
-server listens on **port 8082** and the webhook ingestion server on
-**port 8081** (configurable in `configs/config.yaml`).
+This compiles the binary (`bin/e2e-testing-service`) and starts it. The HTTP API + webhook ingestion share `server.port` (configurable in `configs/config.yaml`, default `8082`).
 
-### 5. Verify the server is running
+#### 5. Verify the server is running
 
 ```bash
 curl http://localhost:8082/health
@@ -136,17 +235,17 @@ curl http://localhost:8082/health
 
 `/health` is the only endpoint that doesn't require authentication.
 
-### 6. Run a test
+#### 6. Run a test
 
 The simplest self-contained test is `local_loop_test`. It triggers the
-project's own webhook server and verifies the `request` receiver picks up
+project's own webhook server and verifies the `webhook` receiver picks up
 the message — no external services needed beyond Redis:
 
 ```bash
 curl -X POST "http://localhost:8082/run?id=local_loop_test"
 ```
 
-### 7. Check the result
+#### 7. Check the result
 
 ```bash
 curl http://localhost:8082/results
@@ -169,7 +268,15 @@ make test-integration
 # Lint
 make lint
 
-# Start everything in Docker (Redis + service)
+# Pull and run the published image (no Go needed)
+docker pull ghcr.io/enac21/e2e-framework:latest
+docker run --rm -p 8082:8082 --env-file .env \
+  -v $(pwd)/my-config.yaml:/app/my-config.yaml:ro \
+  -v $(pwd)/my-tests:/app/my-tests:ro \
+  -e CONFIG_PATH=/app/my-config.yaml \
+  ghcr.io/enac21/e2e-framework:latest
+
+# Or build locally and start everything (Redis + service)
 make docker-up
 
 # Stop Docker services
@@ -182,9 +289,54 @@ make docker-down
 |--------|------|------|-------------|
 | `GET`  | `/health` | No | Liveness check |
 | `POST` | `/run?id={test_id}` | Yes | Trigger a specific test |
+| `POST` | `/run-sequence` | Yes | Run an ordered sequence of tests (see [Run a test group](#run-a-test-group)) |
 | `GET`  | `/results` | Yes | All stored test results (last 100) |
 | `GET`  | `/results/{run_id}` | Yes | Result for a specific run (poll for async) |
 | `GET`  | `/swagger/` | Yes | Interactive API docs (Swagger UI) |
+
+### Run a test group
+
+`POST /run-sequence` runs tests in order. The **body is a plain JSON array of
+test IDs**; alternatively, a `test_group` query param runs a named,
+pre-configured group:
+
+```bash
+# Explicit list of test IDs
+curl -X POST http://localhost:8082/run-sequence \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '["crear_y_verificar_producto","local_loop_test"]'
+
+# Named, pre-configured group (test_group as query param)
+curl -X POST "http://localhost:8082/run-sequence?test_group=ci" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**CI/CD story:** a group lets you change *which* tests a pipeline runs by
+editing `configs/config.yaml` only — the script/call that hits the endpoint
+never changes:
+
+```yaml
+test_groups:
+  ci:
+    description: "Pipeline that runs after every merge"
+    tests:
+      - crear_y_verificar_producto
+      - local_loop_test
+    test_delay: 2s
+    skip_fail_test: true
+```
+
+- `tests` — the ordered list of test IDs to run.
+- `test_delay` / `skip_fail_test` — optional per-group defaults for the
+  `test_delay` and `skip_fail_test` query params.
+- `test_group` and a body test list are **mutually exclusive** (400 if both
+  are sent).
+- An unknown `test_group` returns `404`; an empty list returns `400`.
+
+**Precedence:** explicit query params (`test_delay`, `skip_fail_test`) always
+win; otherwise the group's defaults apply; otherwise the built-in defaults
+(`0`, `false`).
 
 ### Authentication
 
@@ -263,18 +415,19 @@ swag init -g cmd/server/main.go
 
 This updates `docs/docs.go`, `docs/swagger.json`, and `docs/swagger.yaml`.
 
-### `make build` vs `make docker-up`
+### `make build` vs `make docker-up` vs published image
 
-| | `make build` + `make run` | `make docker-up` |
-|---|---|---|
-| **What runs** | Native binary on your machine | Docker containers (Alpine) |
-| **Redis** | You must start it yourself | Included in compose |
-| **Speed** | Fast startup, fast rebuild | Slower (image build + container boot) |
-| **Best for** | Day-to-day development, debugging | Verifying production-like behavior, CI |
-| **Env vars** | Load from `.env` / shell | Set in `docker-compose.yml` |
+| | `make build` + `make run` | `make docker-up` (local build) | Published `ghcr.io/enac21/e2e-framework` |
+|---|---|---|---|
+| **What runs** | Native binary on your machine | Docker containers (Alpine, built locally) | Same container, pulled pre-built (multi-arch) |
+| **Redis** | You must start it yourself | Included in compose | Included if you use the compose file with `image: ghcr.io/...` |
+| **Speed** | Fast startup, fast rebuild | Slower (image build + container boot) | Fastest — no build, just `docker pull` |
+| **Best for** | Day-to-day development, debugging | Verifying the Dockerfile works | Production, CI, onboarding without Go |
+| **Env vars** | Load from `.env` / shell | Set in `docker-compose.yml` | `env_file` / `-e CONFIG_PATH` + volume mounts for custom config/tests |
+| **Custom config** | `CONFIG_PATH=./my-config.yaml make run` | `volumes: - ./my-config.yaml:/app/my-config.yaml:ro` + `CONFIG_PATH` | Same — `docker run -v $(pwd)/my-config.yaml:/app/my-config.yaml:ro -e CONFIG_PATH=/app/my-config.yaml ghcr.io/enac21/e2e-framework:latest` |
 
 For daily development: `make run` + Redis via Docker. For verifying the
-container build works: `make docker-up`.
+container build works: `make docker-up`. For production/onboarding: `docker pull ghcr.io/enac21/e2e-framework:latest` and mount your config/tests (see [Option A](#option-a--published-docker-image-fastest)).
 
 > **Note:** The `Dockerfile` has `EXPOSE 8080` which is inconsistent with the
 > actual default port `8082` in `configs/config.yaml`. The `docker-compose.yml`
@@ -284,7 +437,8 @@ container build works: `make docker-up`.
 
 ## Adding a New Test
 
-Create a YAML file in `tests/` or any subdirectory. No code changes required:
+Create a YAML file in `tests/` or any subdirectory. No code changes required.
+For a field-by-field reference with every default annotated see `tests/example_all_fields.yaml` — each README section below also links to its focused example:
 
 ```yaml
 version: "1"
@@ -293,7 +447,7 @@ description: "Description of what this test verifies"
 
 schedule: "*/5 * * * *"
 enabled: true
-async: false
+async: false          # true → POST /run returns 202 {run_id, status:"running"} immediately and test continues in background (useful with wait_for_receivers). See [Async Mode](#async-mode-asynctrue)
 
 variables:
   base_url: "{{env.BASE_URL}}"
@@ -324,7 +478,7 @@ triggers:
           - type: contains
             field: subject
             value: "Welcome"
-      - type: request
+      - type: webhook
         timeout: 60s
         assertions:
           - type: contains
@@ -338,7 +492,7 @@ triggers:
     extract:
       status: "status"
     receivers:
-      - type: request
+      - type: webhook
         timeout: 15s
         assertions:
           - type: equals
@@ -365,6 +519,8 @@ on_failure:
 
 > For tests that need multiple HTTP calls in order (e.g., create then verify), add more items to the `triggers` list. Each trigger can have its own receivers and a `wait_for_receivers` flag
 
+**`wait_for_receivers` vs `async`:** `wait_for_receivers: true` makes the orchestrator block that step until all its `receivers` complete (`timeout` per receiver, 1s polling for `webhook`) and their `assertions` pass; `false` only fires the `trigger` and moves to the next without waiting. It is independent of `async: true` — with `async: true` `POST /run` returns `202 {run_id, status:"running"}` **immediately** even if the step has `wait_for_receivers: true`; the `wait` still happens in background and you poll `GET /results/{run_id}` until `passed/failed/error`. Ideal for webhooks with long `timeout`.
+
 Each trigger may also declare a `type` (defaults to `http`) and an `options` map. `http` is the only trigger type bundled; its factory receives the shared `response_assertions` registry and currently ignores trigger-level `options` (they are passed to the factory and reserved for future trigger implementations). Triggers are built through a `TriggerRegistry` following the same factory pattern as receivers, so adding a new trigger type means registering a new factory in `main.go` and referencing it per-step (`type: my_type`).
 
 ### Dynamic Variables
@@ -381,7 +537,7 @@ There are three sources of variables, in increasing precedence order (later sour
 
 **Reserved names:** `run_id`, `test_id` and `error` cannot be defined in the `variables:` block. If you try, the value is ignored and a warning is logged.
 
-See `tests/example_welcome_email.yaml` for a complete example.
+> **Examples:** `tests/example_welcome_email.yaml` (full flow with `variables:` + `extract`), `tests/example_variables.yaml` (one-shot `{{uuid()}}` stability), `tests/example_all_fields.yaml` (exhaustive reference with every variable source).
 
 ### The `variables:` Block
 
@@ -423,6 +579,8 @@ on_failure:
 - Each variable is resolved once at start-up of the run; generators are not re-evaluated.
 - Reserved names (`run_id`, `test_id`, `error`) are ignored with a warning.
 - An `extract` value with the same name **overrides** the `variables:` value.
+
+> **Example:** `tests/example_variables.yaml` — stable `request_id: "{{uuid()}}"` reused across triggers; `tests/example_all_fields.yaml` — every `variables:` default annotated.
 
 ### Reusing YAML Blocks (Anchors)
 
@@ -482,6 +640,8 @@ triggers:
 - `<<: *anchor` **merges** the anchored keys into the current map; anything you write on that map overrides the anchored value.
 - Anchors and the `variables:` block are complementary: use `variables:` for values (URLs, IDs, tokens) and anchors for complete structures (headers, receivers, options).
 
+> **Example:** `tests/example_variables.yaml` — `x-post-json: &post_json` reused via `<<: *post_json`; `tests/example_all_fields.yaml` — same anchor plus a full-replacement `*ping` pattern.
+
 ### Template Generators
 
 Besides variables, the framework evaluates **generators** — `{{name(args)}}` tags that produce a fresh value every time they are resolved. They work anywhere template resolution happens: URLs, headers, request/response bodies, assertions and `on_failure.calls`.
@@ -503,6 +663,8 @@ triggers:
 ```
 
 A generator whose arguments are invalid (e.g. `{{randomInt(abc)}}` or `{{uuid(v4)}}`) leaves the placeholder untouched, and the tag is reported by `HasUnresolved` as an unresolved placeholder.
+
+> **Example:** `tests/example_variables.yaml` — `{{uuid()}}`/`{{randomInt(6)}}` as one-shot via `variables:`; `tests/example_all_fields.yaml` — inline per-occurrence vs stable comparison.
 
 ### Increment/Decrement Operator
 
@@ -537,6 +699,8 @@ triggers:
 - If the variable **does not exist**, it is treated as `0` and created by the operator: `{{++(seq)}}` on an undefined `seq` → `1` (leaving `seq=1`), `{{--(seq)}}` → `-1`.
 - If the variable **exists but is not an integer** (e.g. `"abc"`), the variable is left unresolved: the trigger aborts with a clear error, the `on_failure.calls` is skipped, and assertions simply don't match.
 
+> **Example:** `tests/example_increment_int_assertions.yaml` — `{{++(counter)}}`/`{{--(counter)}}` in headers/body/URL (steps 1-3); `tests/example_all_fields.yaml` — counter in URL + body with `{{counter}}` after mutation.
+
 ### Extract Variables
 
 The `extract` block inside a trigger lets you capture values from the HTTP response body and store them as variables for use in subsequent triggers. The syntax is a map where:
@@ -568,6 +732,86 @@ This creates variables `{{user_id}}`, `{{full_name}}`, and `{{org_slug}}` that c
 - JSON paths are case-insensitive
 - If the path doesn't exist in the response, the variable is silently omitted
 - All extracted variables accumulate across triggers — earlier extractions are available in later ones
+
+> **Example:** `tests/crud_productos.yaml` + `tests/crear_y_verificar_producto.yaml` — `extract: {id: "id"}` then `GET /productos/{{id}}`; `tests/example_all_fields.yaml` — every `extract` path + case-insensitivity annotated.
+
+### Retry Logic
+
+By default, a test runs once and is marked as failed if any receiver times out or any assertion does not pass. For flaky or eventually-consistent systems, you can configure automatic retries using the `retry` block:
+
+```yaml
+retry:
+  enabled: true
+  attempts: 3
+  delay: 5s
+```
+
+- `attempts` — total number of executions (initial + retries). `attempts: 3` means the framework will try up to 3 times before giving up.
+- `delay` — how long to wait between attempts. Use standard Go duration strings (`5s`, `1m`, `500ms`).
+
+On each attempt the orchestrator re-creates the receivers, re-fires the trigger and re-collects. If any attempt passes completely, the test is marked as `passed` and no further attempts are made. The `on_failure.calls` notifications (if configured) are only executed **once**, after all attempts are exhausted.
+
+> **Note:** Configuration errors (e.g., an unknown receiver `type`) abort immediately and are never retried, since they will not resolve on their own.
+
+> **Example:** `tests/local_loop_test.yaml` — `retry: {enabled:true, attempts:3, delay:5s}`; `tests/crud_productos.yaml` + `tests/crear_y_verificar_producto.yaml` — `attempts:2`; `tests/example_all_fields.yaml` — `retry` defaults annotated.
+
+### Async Mode (`async: true`)
+
+`async` is at test level, `wait_for_receivers` at trigger level — they are orthogonal:
+
+```yaml
+async: true          # test does not block POST /run
+triggers:
+  - method: POST
+    url: "{{env.app_base_url}}/orders"
+    body: { product_id: "sku-42", message_id: "{{run_id}}" }
+    receivers:
+      - type: webhook
+        timeout: 60s
+    wait_for_receivers: true  # still waits for webhook in background
+```
+
+* `async: false` (default): `POST /run?id={id}` blocks until all `triggers` (plus their `wait_for_receivers`) finish and returns `200` with the full `TestResult` (`passed/failed/error`).
+* `async: true`: `POST /run?id={id}` returns immediately `202 {"run_id":"<uuid>","status":"running"}` and the test continues in background respecting each `wait_for_receivers` and `timeout`. Poll progress with `GET /results/{run_id}` until final state. Essential for webhooks with long `timeout` to avoid holding the HTTP connection open.
+
+`POST /run-sequence` is always synchronous today and returns `200 [TestResult]` at the end; for async flows use `POST /run` per test.
+
+> **Example:** `tests/example_generic_webhook.yaml` — `async: true` with `wait_for_receivers: true`; `tests/manual_imap_test.yaml` — `async: true` IMAP long poll; `tests/example_all_fields.yaml` — `async: false` default annotated.
+
+---
+
+### Step Delay
+
+Use `delay_before` on any trigger step to pause execution for a fixed duration before that step fires. Useful when an upstream service processes events asynchronously and the verify step needs to wait for propagation.
+
+```yaml
+triggers:
+  # Step 1: Create resource via async service
+  - method: POST
+    url: "{{env.BASE_URL}}/v1/test/notifications"
+    headers:
+      Authorization: "Bearer {{env.BASE_TOKEN}}"
+    body:
+      user_id: "abc-123"
+    extract:
+      notification_id: "id"
+
+  # Step 2: Wait 3s for async processing, then verify
+  - method: GET
+    url: "{{env.BASE_URL_2}}/v1/abc-123/notifications/{{notification_id}}"
+    delay_before: 3s
+    expected_status: 200
+    headers:
+      Authorization: "Bearer {{env.BASE_2_TOKEN}}"
+```
+
+**Rules:**
+- `delay_before` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
+- The delay runs **once per step** — before the first attempt. Retries do not repeat the delay (they use `retry.delay` instead).
+- Omitting `delay_before` (or setting it to `0`) skips the delay entirely.
+- The delay is logged: `[run-id] step N waiting Xs before execution`.
+
+> **Example:** `tests/example_all_fields.yaml` — `delay_before: 3s` on the verification `GET` step (step 2).
 
 ### Status Code Assertions
 
@@ -607,6 +851,8 @@ triggers:
 - When `expected_status` is set, the step passes **only** if the response status matches exactly. Any other code — including 2xx — fails the step.
 - When `expected_status` is omitted (default `0`), the original behavior applies: any 4xx/5xx fails the step, any 2xx/3xx passes.
 - `extract` still works when `expected_status` matches a 4xx/5xx — the response body is parsed as JSON and fields can be captured (useful for inspecting error payloads).
+
+> **Example:** `tests/example_increment_int_assertions.yaml` — `expected_status: 200` on webhook.cool steps; `tests/example_all_fields.yaml` — `expected_status: 201` vs `0` default cases.
 
 ### Response Assertions
 
@@ -701,36 +947,191 @@ triggers:
         value: "2"
 ```
 
-### Step Delay
+> **Example:** `tests/example_increment_int_assertions.yaml` — `present` + `int_gt/gte/lte/eq` on `id`; `tests/example_all_fields.yaml` — all 13 `response_assertions` types in one file.
 
-Use `delay_before` on any trigger step to pause execution for a fixed duration before that step fires. Useful when an upstream service processes events asynchronously and the verify step needs to wait for propagation.
+### Receiver Assertions (`assertions`)
+
+`assertions` run **after** a receiver's `Collect` returns a `domain.Message` (`internal/core/services/orchestrator.go:373`). They validate the **collected message `Fields`**, not the trigger response — `field`/`value` are templatized with the current run vars (`internal/core/services/orchestrator.go:374`).
+
+Only these **5 types** are registered (`internal/adapters/secondary/assertions/receiver/*.go`, wired in `cmd/server/main.go:104`):
+
+| Type | Passes when (`msg.Fields[field]` vs `value`) | File |
+|---|---|---|
+| `equals` | `actual == value` | `assertion_equals.go` |
+| `contains` | `strings.Contains(actual, value)` | `assertion_contains.go` |
+| `not_contains` | `!strings.Contains(actual, value)` | `assertion_not_contains.go` |
+| `present` | field exists and `actual != ""` | `assertion_present.go` |
+| `matches` | `regexp.MatchString(value, actual)` | `assertion_matches.go` |
+
+All other types (`array_contains`, `map_contains`, `length`, `int_eq/gt/gte/lt/lte`) belong to `response_assertions` only (`internal/adapters/secondary/assertions/trigger:46`, 13 types) and are documented in [Response Assertions](#response-assertions) — they do **not** exist for `receivers[].assertions`.
+
+**Field namespaces** — `field` is a plain `Fields[field]` lookup lowercased at ingestion (`httputil/payload.go:66`, `providers/generic.go:54`):
+
+| Receiver | `field` examples | Populated by |
+|---|---|---|
+| `webhook` | `headers.x-provider`, `headers.content-type`, `query.status`, `body.data.order_id`, `body.status`, `method` | `providers/generic.go:49-61` — `headers.<name>` from `req.Header`, `query.<name>` from `req.URL.Query()`, `body.<path>` flattened JSON via `ExtractFields`/`FlattenJSON` (bare `data.order_id` also kept at `generic.go:50`), form `body.<field>` via `ParseForm`, `method` from `req.Method` |
+| `api` | `body.data.status`, `body.data.order_id`, `headers.content-type` | `receiver/api/receiver.go:174-197` — flattened polled response body (lowercased dot paths); prefer `body.*` |
+| `imap` | `subject`, `body`, `from`, `to` | `receiver/imap` — parsed email fields |
+
+Use **lowercase** in `field` (`headers.x-provider` not `headers.X-Provider`).
+
+### Receiver Options
+
+Some receivers (like `imap`) require connection-specific configuration that can vary per test. Use the `options` block inside the receiver definition to pass any key-value configuration. These options are passed directly to the receiver factory, so each test can target a different server:
+
+```yaml
+receivers:
+  - type: imap
+    timeout: 60s
+    options:
+      host: imap.company.com
+      port: "993"
+      username: qa@company.com
+      password: secret
+      mailbox: INBOX
+      tls: "true"
+```
+
+For webhook-based receivers (e.g., `webhook`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
+
+> **Example:** `tests/manual_imap_test.yaml` + `tests/example_welcome_email.yaml` — full `options: {host, port, username, password, mailbox, tls}`; `tests/example_all_fields.yaml` — `imap` + `webhook`/`api` options side-by-side.
+
+### Webhook Receiver (`type: webhook`)
+
+The webhook receiver lets any external provider signal a test run without writing Go code.
+It works with two components:
+
+1. **Ingestion** — the provider (or the app under test) POSTs to
+   `{{WEBHOOK_BASE_URL}}/webhook/generic` with the run_id in a query param (`?run_id=`),
+   header (`X-E2E-Run-ID`), or body field (`run_id`). 
+   
+   The server captures the full request — headers, query params, body and deposits it into the store.
+
+2. **Collection** — the receiver polls the store (`Claim(runID, "webhook")`) every 1s
+   within the configured `timeout` budget, then runs `assertions` against the captured
+   fields.
+
+All assertion field namespaces and types are documented centrally in [Receiver Assertions](#receiver-assertions-assertions).
+
+**Run ID resolution order:**
+
+1. Query param `?run_id=<value>`
+2. Header `X-E2E-Run-ID: <value>`
+3. Body field `run_id` or `runid`
+4. No match → 400
+
+**Example — minimal (`headers` / `query` / `body`):**
 
 ```yaml
 triggers:
-  # Step 1: Create resource via async service
   - method: POST
-    url: "{{env.BASE_URL}}/v1/test/notifications"
-    headers:
-      Authorization: "Bearer {{env.BASE_TOKEN}}"
+    url: "{{env.app_base_url}}/api/orders"
     body:
-      user_id: "abc-123"
-    extract:
-      notification_id: "id"
-
-  # Step 2: Wait 3s for async processing, then verify
-  - method: GET
-    url: "{{env.BASE_URL_2}}/v1/abc-123/notifications/{{notification_id}}"
-    delay_before: 3s
-    expected_status: 200
-    headers:
-      Authorization: "Bearer {{env.BASE_2_TOKEN}}"
+      product_id: "sku-42"
+      message_id: "{{run_id}}"
+    receivers:
+      - type: webhook
+        timeout: 60s
+        assertions:
+          - type: equals
+            field: headers.x-provider
+            value: "acme"
+          - type: equals
+            field: query.status
+            value: "confirmed"
+          - type: contains
+            field: body.message_id
+            value: "{{run_id}}"
+    wait_for_receivers: true
 ```
 
-**Rules:**
-- `delay_before` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
-- The delay runs **once per step** — before the first attempt. Retries do not repeat the delay (they use `retry.delay` instead).
-- Omitting `delay_before` (or setting it to `0`) skips the delay entirely.
-- The delay is logged: `[run-id] step N waiting Xs before execution`.
+The app must callback to:
+
+`POST {{WEBHOOK_BASE_URL}}/webhook/generic?run_id={{run_id}}`
+
+For the full field reference (`headers.*` / `query.*` / `body.*` / `method`) and the 5 assertion types see [Receiver Assertions](#receiver-assertions-assertions).
+
+> **Tip `async` + `wait_for_receivers`:** if the webhook has a long `timeout`, set `async: true` at the test level. `POST /run` will return `202 {run_id, status:"running"}` instantly even if the trigger has `wait_for_receivers: true`; the `wait` continues in background and you poll `GET /results/{run_id}`. See [Async Mode](#async-mode-asynctrue).
+
+> **Example:** `tests/example_generic_webhook.yaml` — `type: webhook` with `headers.x-provider`/`query.status`/`body` assertions; `tests/local_loop_test.yaml` — self-contained loop via `POST /webhook/twilio`; `tests/example_all_fields.yaml` — all webhook field paths.
+
+For providers that embed the correlation token in a nested JSON path, write a custom
+extractor and register it in `main.go` under a provider-specific path
+(e.g. `POST /webhook/provider_name`). Actual valid ones: twilio, meta & generic
+
+### API Receiver (`type: api`)
+
+There are **two** "API receiver" flows:
+
+| Flow | Type | Semantics |
+|------|------|-----------|
+| **Webhook / home-delivered** | `webhook` (existing) | A provider pushes a message to the webhook server; the receiver polls the store until it arrives or times out. |
+| **Outbound polling** | `api` (new) | The receiver **makes the HTTP call itself**, repeatedly, until the response satisfies the predicate or the budget (`timeout`) expires. |
+
+The `type: api` receiver behaves like a **trigger that polls**: every `interval`
+it executes an HTTP request and succeeds when `expected_status` and the
+trigger-style `response_assertions` both pass. Failures are **transient** — only
+the `timeout` fails the run, so it composes naturally on an eventual-consistency
+verification step.
+
+```yaml
+triggers:
+  - method: POST
+    url: "{{env.orders_api}}/checkout"
+    body: { order_id: "{{order_id}}" }
+    receivers:
+      - type: api
+        interval: 5s
+        timeout: 60s
+        method: GET
+        url: "{{env.orders_api}}/orders/{{order_id}}"
+        headers:
+          Authorization: "Bearer {{env.API_TOKEN}}"
+        expected_status: 200
+        response_assertions:              # poll predicate — retried until timeout
+          - type: equals
+            field: data.status
+            value: "paid"
+        assertions:                        # receiver assertions — run once after predicate passes
+          - type: equals
+            field: body.data.order_id
+            value: "{{order_id}}"
+          - type: contains
+            field: body.data.status
+            value: "paid"
+    wait_for_receivers: true
+```
+
+> **Poll vs receive:** `response_assertions` decide *when to stop polling* (retried); `assertions` decide *whether the final message is correct* (failed once). Field namespaces and the 5 receiver assertion types are documented in [Receiver Assertions](#receiver-assertions-assertions).
+
+**Fields:**
+
+- `interval` — how often to poll (Go duration, e.g. `5s`). Default `5s`.
+- `timeout` — overall budget for polling; after it, the receiver returns
+  `ErrTimeout` and the test fails. Required unless you want the run's own
+  deadline to govern.
+- `method` (default `GET`), `url` (required), `headers`, `body` — the polled
+  request. `body` is serialized as JSON unless `Content-Type:
+  application/x-www-form-urlencoded` is set (same rules as triggers).
+- `expected_status` — when set (> 0), the attempt passes **only** if the status
+  matches exactly; when unset, any 2xx/3xx passes and 4xx/5xx is a transient
+  failure.
+- `response_assertions` — the trigger assertion types (`equals`, `contains`,
+  `present`, `array_contains`, `int_gt`, …) evaluated against the flattened
+  JSON body of **each** poll. Values support `{{variable}}` substitution.
+- `{{variable}}` substitution works in `url`, `headers`, `body` and assertion
+  values — the receiver receives the full run variables (from `variables:`,
+  prior triggers' `extract`, and `run_id`).
+- `extract` — accepted by the schema but **not** yet merged back into run
+  variables (planned separately).
+- `assertions` — message-style assertions run by the orchestrator **after** the
+  polling predicate passes, against the flattened response body.
+
+On success the receiver returns the response as a `domain.Message` (`Headers`,
+`Fields` flattened from the JSON body, `Raw` body), so message-style `assertions`
+keep working as with any other receiver.
+
+> **Example:** `tests/example_api_polling.yaml` — `type: api` polling every `5s` until `response_assertions` pass; `tests/example_all_fields.yaml` — `api` + `webhook` receivers in the same trigger.
 
 ### on_failure Block
 
@@ -778,44 +1179,7 @@ Each call supports the same core fields as a trigger: `method` (default `POST`),
 - A call is logged as failed (non-fatal) if the endpoint returns an HTTP error or a status different from `expected_status`.
 - If no call is configured, nothing happens.
 
-### Receiver Options
-
-Some receivers (like `imap`) require connection-specific configuration that can vary per test. Use the `options` block inside the receiver definition to pass any key-value configuration. These options are passed directly to the receiver factory, so each test can target a different server:
-
-```yaml
-receivers:
-  - type: imap
-    timeout: 60s
-    options:
-      host: imap.company.com
-      port: "993"
-      username: qa@company.com
-      password: secret
-      mailbox: INBOX
-      tls: "true"
-```
-
-For webhook-based receivers (e.g., `request`), the `options` field is not required as those receivers are configured globally in `config.yaml`.
-
-### Retry Logic
-
-By default, a test runs once and is marked as failed if any receiver times out or any assertion does not pass. For flaky or eventually-consistent systems, you can configure automatic retries using the `retry` block:
-
-```yaml
-retry:
-  enabled: true
-  attempts: 3
-  delay: 5s
-```
-
-- `attempts` — total number of executions (initial + retries). `attempts: 3` means the framework will try up to 3 times before giving up.
-- `delay` — how long to wait between attempts. Use standard Go duration strings (`5s`, `1m`, `500ms`).
-
-On each attempt the orchestrator re-creates the receivers, re-fires the trigger and re-collects. If any attempt passes completely, the test is marked as `passed` and no further attempts are made. The `on_failure.calls` notifications (if configured) are only executed **once**, after all attempts are exhausted.
-
-> **Note:** Configuration errors (e.g., an unknown receiver `type`) abort immediately and are never retried, since they will not resolve on their own.
-
----
+> **Example:** `tests/example_welcome_email.yaml` — two `on_failure.calls` (alerts + Slack) with `{{test_id}}/{{run_id}}/{{error}}`; `tests/example_all_fields.yaml` — every `CallAction` field + `{{uuid()}}` in body annotated.
 
 ## Adding a New Receiver
 
@@ -834,52 +1198,74 @@ plain values.
 
 ```yaml
 # configs/config.yaml
+# Only keys parsed by internal/pkg/config/config.go are shown.
+# See tests/example_all_fields.yaml for the test YAML reference.
 
 version: "1"
 
 server:
   port: 8082           # HTTP API port
-  timeout: 30s
 
 auth:
   enabled: true        # Set to false for local development to skip JWT
   jwt_secret: "{{env.JWT_SECRET}}"
 
-webhook:
-  port: 8081           # Webhook ingestion server port (Twilio, Meta, etc.)
-
 store:
+  type: redis          # redis | postgres | memory | disabled   (default: redis)
   redis:
-    url: "{{env.REDIS_URL}}" //TODO - Cluster mode & credentials
+    url: "{{env.REDIS_URL}}"
     ttl: 300s          # How long received messages are kept
-
-scheduler:
-  enabled: true
-  timezone: "Europe/Madrid"
+    username: "{{env.REDIS_USERNAME}}"
+    password: "{{env.REDIS_PASSWORD}}"
+    cluster_mode: false
+  postgres:
+    dsn: "{{env.POSTGRES_DSN}}"
+    ttl: 300s
+  memory:
+    ttl: 300s
 
 tests:
   path: "./tests"      # Directory containing YAML test definitions
 
-receivers:
-  sms:
-    provider: twilio
-    # fields TBD during SmsReceiver implementation
-  push:
-    provider: fcm
-    # fields TBD during PushReceiver implementation
-  webhook:
-    base_url: "{{env.WEBHOOK_BASE_URL}}"
-
-logging:
-  level: info           # debug | info | warn | error
-  format: json          # json (production) | text (local)
+test_groups:
+  ci:
+    description: "Pipeline that runs after every merge"
+    tests:
+      - local_loop_test
+      - example_variables
+    test_delay: 2s
+    skip_fail_test: true
 ```
+
+### Store backends
+
+The message store used to buffer received messages between the webhook
+ingestion and the `webhook` receiver is pluggable. Select the backend with the
+`store.type` key (`redis` | `postgres` | `memory` | `disabled`, default `redis`).
+
+| Backend | Purpose |
+|---------|---------|
+| `redis` | **Default.** Distributed, supports cluster mode. Requires `REDIS_URL`. |
+| `postgres` | Distributed, relational. Requires `POSTGRES_DSN` (pgx/v5). Schema is created automatically on startup. |
+| `memory` | Single-process, in-memory, mutex-protected. No external dependency. Great for local dev and CI. |
+| `disabled` | Fully disables the database (no-op store). `webhook` receivers poll until their timeout. |
+
+Only the section matching the selected backend is read; the others are ignored.
+`store.type` may be omitted — it defaults to `redis`, so existing config files
+keep working unchanged.
+
+> **Running without a DB:** set `store.type: disabled` (or `STORE_TYPE=disabled`). The
+> service starts with **no** database dependency. Any test that uses a
+> `webhook` receiver will time out waiting for a message, which is
+> expected for DB-less runs — use this for pure HTTP-trigger tests.
 
 ### Environment variables
 
 | Variable | Required | Used in | Description |
 |----------|----------|---------|-------------|
-| `REDIS_URL` | Yes | `config.yaml` | Redis connection URL (e.g. `redis://localhost:6379`) |
+| `REDIS_URL` | Yes (if `store.type: redis`) | `config.yaml` | Redis connection URL (e.g. `redis://localhost:6379`) |
+| `POSTGRES_DSN` | Yes (if `store.type: postgres`) | `config.yaml` | PostgreSQL connection DSN (pgx/v5 format) |
+| `STORE_TYPE` | No | `config.yaml` | Overrides `store.type` (`redis`/`postgres`/`memory`/`disabled`) |
 | `JWT_SECRET` | Yes | `config.yaml` | Shared secret for JWT signing/validation |
 | `WEBHOOK_BASE_URL` | No | `config.yaml` | Base URL for webhook receiver callbacks |
 | `IMAP_HOST` | No | Test YAMLs | IMAP server hostname for email tests |

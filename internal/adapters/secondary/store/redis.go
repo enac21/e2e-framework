@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/config"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -14,21 +15,13 @@ import (
 const e2eTestKey = "e2e-test:%s:%s"
 const reservationTTL = 1 * time.Hour
 
-type RedisStoreConfig struct {
-	URL         string
-	TTL         time.Duration
-	Username    string
-	Password    string
-	ClusterMode bool
-}
-
 type RedisStore struct {
 	client redis.Cmdable
 	close  func() error
 	ttl    time.Duration
 }
 
-func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
+func NewRedisStore(cfg config.RedisStoreConfig) (*RedisStore, error) {
 	if len(cfg.URL) == 0 {
 		return nil, fmt.Errorf("%w: redis mode requires at least one URL", domain.ErrConfiguration)
 	}

@@ -57,6 +57,16 @@ type ReceiverConfig struct {
 	Recipient  string            `yaml:"recipient"`
 	Options    OptionsMap        `yaml:"options"`
 	Assertions []AssertionConfig `yaml:"assertions"`
+
+	// Trigger-like fields used by the "api" receiver (outbound HTTP polling).
+	Interval        time.Duration     `yaml:"interval"`
+	Method          string            `yaml:"method"`
+	URL             string            `yaml:"url"`
+	Headers         map[string]string `yaml:"headers"`
+	Body            map[string]any    `yaml:"body"`
+	ExpectedStatus  int               `yaml:"expected_status"`
+	ResponseAsserts []AssertionConfig `yaml:"response_assertions"`
+	Extract         map[string]string `yaml:"extract"`
 }
 
 type OptionsMap map[string]string

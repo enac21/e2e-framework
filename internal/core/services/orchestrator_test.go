@@ -488,3 +488,89 @@ func TestRunSequence_UnknownTriggerTypeFailsStep(t *testing.T) {
 		t.Errorf("expected error to mention unknown trigger type, got %q", result.Error)
 	}
 }
+
+func TestRunSequence_PassesTriggerVarsToReceiverStart(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockTrigger := mocks.NewMockTrigger(ctrl)
+	mockReceiver := mocks.NewMockReceiver(ctrl)
+	mockStore := mocks.NewMockStore(ctrl)
+	mockNotifier := mocks.NewMockNotifier(ctrl)
+
+	triggerReg := trigger.NewTriggerRegistry()
+	triggerReg.Register(domain.HTTPTriggerType, func(options map[string]string) (ports.Trigger, error) {
+		return mockTrigger, nil
+	})
+
+	receiverReg := receiver.NewReceiverRegistry()
+	receiverReg.Register("mock-recv", func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
+		return mockReceiver, nil
+	})
+
+	orch := NewOrchestrator(
+		triggerReg,
+		mockStore,
+		receiverReg,
+		receiverasserts.NewReceiverAssertionRegistry(),
+		mockNotifier,
+	)
+
+	triggerStep := domain.TriggerConfig{
+		Method:           "GET",
+		URL:              "http://x",
+		WaitForReceivers: true,
+		Receivers: []domain.ReceiverConfig{
+			{Type: "mock-recv"},
+		},
+	}
+
+	def := domain.TestDefinition{
+		ID:        "t1",
+		Enabled:   true,
+		Variables: map[string]string{"customer": "acme"},
+		Triggers:  []domain.TriggerConfig{triggerStep},
+	}
+
+	mockTrigger.EXPECT().
+		Execute(gomock.Any(), triggerStep, gomock.Any(), gomock.Any()).
+		Return(map[string]string{"order_id": "o-1"}, nil)
+
+	var gotVars map[string]string
+
+	mockReceiver.EXPECT().
+		Start(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, vars map[string]string) error {
+			gotVars = vars
+
+			return nil
+		}).
+		Times(1)
+
+	mockReceiver.EXPECT().
+		Collect(gomock.Any()).
+		Return(&domain.Message{RunID: "r", ReceiverType: "mock-recv"}, nil).
+		Times(1)
+
+	mockReceiver.EXPECT().Stop().Return(nil).Times(1)
+
+	mockStore.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
+
+	results := orch.RunSequence(context.Background(), []domain.TestDefinition{def}, SequenceConfig{})
+
+	if got := results[0].Status; got != domain.StatusPassed {
+		t.Fatalf("expected status %q, got %q", domain.StatusPassed, got)
+	}
+
+	if gotVars["customer"] != "acme" {
+		t.Errorf("expected variables block var passed to receiver Start, got %q", gotVars["customer"])
+	}
+
+	if gotVars["order_id"] != "o-1" {
+		t.Errorf("expected extracted var passed to receiver Start, got %q", gotVars["order_id"])
+	}
+
+	if gotVars["run_id"] == "" {
+		t.Error("expected builtin run_id present in receiver Start vars")
+	}
+}
