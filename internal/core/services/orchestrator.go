@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	receiverasserts "e2e-framework/internal/adapters/secondary/assertions/receiver"
 	"e2e-framework/internal/adapters/secondary/receiver"
 	"e2e-framework/internal/adapters/secondary/trigger"
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
+	"e2e-framework/internal/pkg/assertion"
 	"e2e-framework/internal/pkg/template"
 )
 
@@ -31,7 +31,7 @@ type Orchestrator struct {
 	triggers   *trigger.TriggerRegistry
 	store      ports.Store
 	receivers  *receiver.ReceiverRegistry
-	assertions *receiverasserts.ReceiverAssertionRegistry
+	assertions *assertion.Registry
 	notifier   ports.Notifier
 }
 
@@ -39,7 +39,7 @@ func NewOrchestrator(
 	triggers *trigger.TriggerRegistry,
 	store ports.Store,
 	receivers *receiver.ReceiverRegistry,
-	assertions *receiverasserts.ReceiverAssertionRegistry,
+	assertions *assertion.Registry,
 	notifier ports.Notifier,
 ) *Orchestrator {
 	return &Orchestrator{

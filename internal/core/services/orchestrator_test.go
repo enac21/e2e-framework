@@ -9,12 +9,12 @@ import (
 
 	"go.uber.org/mock/gomock"
 
-	receiverasserts "e2e-framework/internal/adapters/secondary/assertions/receiver"
 	"e2e-framework/internal/adapters/secondary/receiver"
 	"e2e-framework/internal/adapters/secondary/trigger"
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/ports/mocks"
+	"e2e-framework/internal/pkg/assertion"
 )
 
 func newTestOrchestrator(
@@ -36,7 +36,7 @@ func newTestOrchestrator(
 		triggerReg,
 		mockStore,
 		receiver.NewReceiverRegistry(),
-		receiverasserts.NewReceiverAssertionRegistry(),
+		assertion.NewDefaultRegistry(),
 		mockNotifier,
 	)
 
@@ -512,7 +512,7 @@ func TestRunSequence_PassesTriggerVarsToReceiverStart(t *testing.T) {
 		triggerReg,
 		mockStore,
 		receiverReg,
-		receiverasserts.NewReceiverAssertionRegistry(),
+		assertion.NewDefaultRegistry(),
 		mockNotifier,
 	)
 

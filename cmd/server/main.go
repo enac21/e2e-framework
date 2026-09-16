@@ -14,8 +14,6 @@ import (
 	"e2e-framework/internal/adapters/primary/cron"
 	"e2e-framework/internal/adapters/primary/webhook"
 	webhookproviders "e2e-framework/internal/adapters/primary/webhook/providers"
-	receiverasserts "e2e-framework/internal/adapters/secondary/assertions/receiver"
-	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/adapters/secondary/notifier"
 	"e2e-framework/internal/adapters/secondary/receiver"
 	receiverapi "e2e-framework/internal/adapters/secondary/receiver/api"
@@ -26,6 +24,7 @@ import (
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/services"
+	"e2e-framework/internal/pkg/assertion"
 	"e2e-framework/internal/pkg/config"
 )
 
@@ -58,82 +57,62 @@ func main() {
 
 	log.Printf("Loaded %d test definitions", len(tests))
 
-	storeReg := store.NewStoreRegistry()
-	storeReg.Register("redis", func(cfg config.StoreConfig) (ports.Store, error) {
+	storeRegistry := store.NewStoreRegistry()
+	storeRegistry.Register("redis", func(cfg config.StoreConfig) (ports.Store, error) {
 		return store.NewRedisStore(cfg.Redis)
 	})
-	storeReg.Register("postgres", func(cfg config.StoreConfig) (ports.Store, error) {
+	storeRegistry.Register("postgres", func(cfg config.StoreConfig) (ports.Store, error) {
 		return store.NewPostgresStore(cfg.Postgres)
 	})
-	storeReg.Register("memory", func(cfg config.StoreConfig) (ports.Store, error) {
+	storeRegistry.Register("memory", func(cfg config.StoreConfig) (ports.Store, error) {
 		return store.NewMemoryStore(cfg.Memory), nil
 	})
-	storeReg.Register("disabled", func(cfg config.StoreConfig) (ports.Store, error) {
+	storeRegistry.Register("disabled", func(cfg config.StoreConfig) (ports.Store, error) {
 		return store.NewDisabledStore(), nil
 	})
 
-	s, err := storeReg.Create(cfg.Store)
+	s, err := storeRegistry.Create(cfg.Store)
 	if err != nil {
 		log.Fatalf("failed to create store: %v", err)
 	}
 	defer s.Close()
 	log.Printf("Store initialized with type: %s", cfg.Store.Type)
 
-	triggerAssertionReg := triggerasserts.NewTriggerAssertionRegistry()
-	triggerAssertionReg.Register("equals", triggerasserts.NewEqualsAssertion)
-	triggerAssertionReg.Register("contains", triggerasserts.NewContainsAssertion)
-	triggerAssertionReg.Register("not_contains", triggerasserts.NewNotContainsAssertion)
-	triggerAssertionReg.Register("present", triggerasserts.NewPresentAssertion)
-	triggerAssertionReg.Register("matches", triggerasserts.NewMatchesAssertion)
-	triggerAssertionReg.Register("array_contains", triggerasserts.NewArrayContainsAssertion)
-	triggerAssertionReg.Register("map_contains", triggerasserts.NewMapContainsAssertion)
-	triggerAssertionReg.Register("length", triggerasserts.NewLengthAssertion)
-	triggerAssertionReg.Register("int_eq", triggerasserts.NewIntEqAssertion)
-	triggerAssertionReg.Register("int_gt", triggerasserts.NewIntGtAssertion)
-	triggerAssertionReg.Register("int_gte", triggerasserts.NewIntGteAssertion)
-	triggerAssertionReg.Register("int_lt", triggerasserts.NewIntLtAssertion)
-	triggerAssertionReg.Register("int_lte", triggerasserts.NewIntLteAssertion)
+	assertionRegistry := assertion.NewDefaultRegistry()
 
-	triggerReg := trigger.NewTriggerRegistry()
-	triggerReg.Register(domain.HTTPTriggerType, func(options map[string]string) (ports.Trigger, error) {
-		return trigger.NewHTTPTrigger(triggerAssertionReg), nil
+	triggerRegistry := trigger.NewTriggerRegistry()
+	triggerRegistry.Register(domain.HTTPTriggerType, func(options map[string]string) (ports.Trigger, error) {
+		return trigger.NewHTTPTrigger(assertionRegistry)
 	})
 
 	httpNotifier := notifier.NewHTTPNotifier()
 
-	assertionReg := receiverasserts.NewReceiverAssertionRegistry()
-	assertionReg.Register("contains", receiverasserts.NewContainsAssertion)
-	assertionReg.Register("equals", receiverasserts.NewEqualsAssertion)
-	assertionReg.Register("matches", receiverasserts.NewMatchesAssertion)
-	assertionReg.Register("present", receiverasserts.NewPresentAssertion)
-	assertionReg.Register("not_contains", receiverasserts.NewNotContainsAssertion)
-
-	receiverReg := receiver.NewReceiverRegistry()
-	receiverReg.Register(
+	receiverRegistry := receiver.NewReceiverRegistry()
+	receiverRegistry.Register(
 		domain.WebhookReceiverType,
 		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
 			return receiverwebhook.NewWebhookReceiver(s), nil
 		},
 	)
-	receiverReg.Register(
+	receiverRegistry.Register(
 		domain.ImapReceiverType,
 		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
 			return imap.NewIMAPReceiver(cfg.Options)
 		},
 	)
-	receiverReg.Register(
+	receiverRegistry.Register(
 		domain.APIReceiverType,
 		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
-			return receiverapi.NewAPIPollingReceiver(cfg, triggerAssertionReg, &http.Client{})
+			return receiverapi.NewAPIPollingReceiver(cfg, assertionRegistry, &http.Client{})
 		},
 	)
 
 	// Core Orchestrator
 	orchestrator := services.NewOrchestrator(
-		triggerReg,
+		triggerRegistry,
 		s,
-		receiverReg,
-		assertionReg,
+		receiverRegistry,
+		assertionRegistry,
 		httpNotifier,
 	)
 

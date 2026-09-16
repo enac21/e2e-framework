@@ -854,127 +854,66 @@ triggers:
 
 > **Example:** `tests/example_increment_int_assertions.yaml` — `expected_status: 200` on webhook.cool steps; `tests/example_all_fields.yaml` — `expected_status: 201` vs `0` default cases.
 
-### Response Assertions
+### Assertions
+All **13 assertion types** are implemented once in the centralized `internal/pkg/assertion/*.go` (single `Registry` for both, wired in `cmd/server/main.go:81` via `assertion.NewDefaultRegistry()`). They are used in three places:
 
-Use `response_assertions` inside a trigger to validate fields in the HTTP response body directly — no receiver needed. This is useful for verifying that a creation returned a valid ID, a GET returned expected data, or an error response has a specific code.
+| Location | YAML key | When evaluated | Input |
+|---|---|---|---|
+| Trigger | `triggers[].response_assertions` | Immediately after the trigger HTTP response | Flattened response body (`httputil.FlattenJSON` lowercased) + `Raw` (`receiver/api/receiver.go:174` / `trigger/http.go:136`) |
+| Receiver | `triggers[].receivers[].assertions` | After `Collect` returns `domain.Message` (`orchestrator.go:373`) | `Message.Fields` / `Raw` from the collector (`providers/generic.go:49` for webhook) |
+| API poll predicate | `receivers[].response_assertions` (`type: api` only) | Each poll, retried until `timeout` | Same as trigger — flattened polled body + `Raw` |
 
+`field`/`value` support `{{variable}}` substitution (run vars, `variables:`/`extract`/`env`) — `orchestrator.go:374` for receivers, `assertion/registry.go:54` for triggers.
 **Assertion types:**
 
 | Type | `field` syntax | Passes when |
 |------|---------------|-------------|
-| `equals` | dot-path | value is exactly `value` |
-| `contains` | dot-path | value contains `value` as a substring |
-| `not_contains` | dot-path | value does not contain `value` |
-| `present` | dot-path | field exists and is non-empty |
-| `matches` | dot-path | value matches the `value` regex pattern |
-| `array_contains` | gjson path (e.g. `items.#.name`) | any element resolved by the path equals `value`; supports nested arrays |
-| `map_contains` | gjson path with `@values` (e.g. `labels.@values`) | any value in a dynamic-key object equals `value` |
-| `length` | dot-path to array | array has exactly `value` elements |
-| `int_eq` | dot-path | field value equals `value` numerically |
-| `int_gt` | dot-path | field value is greater than `value` |
-| `int_gte` | dot-path | field value is greater than or equal to `value` |
-| `int_lt` | dot-path | field value is less than `value` |
-| `int_lte` | dot-path | field value is less than or equal to `value` |
+| `equals` | plain field (lowercased) | `actual == value` |
+| `contains` | plain field | `value` is substring of `actual` |
+| `not_contains` | plain field | `value` not in `actual` |
+| `present` | plain field | field exists and `actual != ""` |
+| `matches` | plain field | `actual` matches `value` regex |
+| `array_contains` | gjson path (e.g. `items.#.name`) | any element via `gjson.Get(Raw, field)` equals `value` (nested arrays) |
+| `map_contains` | gjson path with `@values` (e.g. `labels.@values`) | any `@values` element equals `value` |
+| `length` | dot-path to array | `Fields[field+".__len__"] == value` |
+| `int_eq` | dot-path | `int(Field) == int(Value)` |
+| `int_gt` | dot-path | `>` |
+| `int_gte` | dot-path | `>=` |
+| `int_lt` | dot-path | `<` |
+| `int_lte` | dot-path | `<=` |
 
-**Numeric comparison:** the `int_*` assertions parse both sides as 64-bit integers (whitespace-trimmed) and compare numerically — `10` matches `int_gt` against `"9"`. If either side is not an integer, the assertion fails.
+**Numeric:** `int_*` parse both sides as `int64` (trimmed) — `"10"` > `"9"` numerically; non-integer fails.
 
-```yaml
-response_assertions:
-  - type: present
-    field: "id"
-  - type: int_gt
-    field: "quantity"
-    value: "0"
-  - type: int_lte
-    field: "page"
-    value: "3"
-```
-
-**gjson path syntax for `array_contains` / `map_contains`:**
+**gjson paths for `array_contains`/`map_contains`:**
 
 | Pattern | Meaning |
 |---------|---------|
-| `items.#.name` | all `name` values from the `items` array |
-| `data.#.statuses.#.general_status` | `general_status` from every status in every data element (nested arrays) |
-| `labels.@values` | all values of an object with dynamic keys |
-| `labels.@values.#.tag` | `tag` field from each map value (when values are objects) |
-| `items.0.name` | specific index access (unchanged dot-notation) |
+| `items.#.name` | all `name` from `items` array |
+| `data.#.statuses.#.general_status` | nested arrays |
+| `labels.@values` | all values of dynamic-key object |
+| `labels.@values.#.tag` | `tag` of each map value |
+| `items.0.name` | indexed access |
 
-Full gjson path reference: https://github.com/tidwall/gjson#path-syntax
+Full refs: `internal/pkg/assertion/*.go`, `internal/pkg/assertion/util.go` (WalkFind), https://github.com/tidwall/gjson#path-syntax
 
-```yaml
-triggers:
-  - method: POST
-    url: "https://api.example.com/orders"
-    headers:
-      Content-Type: application/json
-    body:
-      product: "widget"
-      quantity: 3
-    extract:
-      order_id: "id"
-    response_assertions:
-      - type: present
-        field: "id"
-      - type: equals
-        field: "status"
-        value: "pending"
-      - type: contains
-        field: "product"
-        value: "widget"
-      - type: matches
-        field: "created_at"
-        value: "^\d{4}-\d{2}-\d{2}"
-      - type: not_contains
-        field: "error"
-        value: "failed"
+**Field namespaces** (`field` is lowercased at ingestion `httputil/payload.go:66`):
 
-  # Subsequent trigger can use the extracted order_id
-  - method: GET
-    url: "https://api.example.com/orders/{{order_id}}"
-    response_assertions:
-      - type: equals
-        field: "id"
-        value: "{{order_id}}"
-      - type: equals
-        field: "status"
-        value: "pending"
-      - type: array_contains
-        field: "orders.#.address.city"
-        value: "Madrid"
-      - type: length
-        field: "notifications"
-        value: "2"
-```
+| Context | `field` examples | Populated by |
+|---|---|---|
+| Trigger / API poll | `id`, `data.status`, `items.#.name` | `httputil.FlattenJSON` |
+| Webhook receiver | `headers.x-provider`, `query.status`, `body.data.order_id`, `method` | `providers/generic.go:49` — `headers.<name>` / `query.<name>` / `body.<path>` (also bare `data.order_id` compat) / `method` |
+| API receiver (post-poll) | `body.data.status`, `headers.content-type` | `receiver/api/receiver.go:206` |
+| IMAP receiver | `subject`, `body`, `from` | `receiver/imap` |
 
-> **Example:** `tests/example_increment_int_assertions.yaml` — `present` + `int_gt/gte/lte/eq` on `id`; `tests/example_all_fields.yaml` — all 13 `response_assertions` types in one file.
+Use lowercase (`headers.x-provider` not `headers.X-Provider`). See examples under `triggers[].response_assertions` and `receivers[].assertions` below.
+
+### Response Assertions
+
+Use `response_assertions` inside a trigger to validate the HTTP response body directly — no receiver needed. See [Assertions](#assertions) for all 13 types and field syntax.
 
 ### Receiver Assertions (`assertions`)
 
-`assertions` run **after** a receiver's `Collect` returns a `domain.Message` (`internal/core/services/orchestrator.go:373`). They validate the **collected message `Fields`**, not the trigger response — `field`/`value` are templatized with the current run vars (`internal/core/services/orchestrator.go:374`).
-
-Only these **5 types** are registered (`internal/adapters/secondary/assertions/receiver/*.go`, wired in `cmd/server/main.go:104`):
-
-| Type | Passes when (`msg.Fields[field]` vs `value`) | File |
-|---|---|---|
-| `equals` | `actual == value` | `assertion_equals.go` |
-| `contains` | `strings.Contains(actual, value)` | `assertion_contains.go` |
-| `not_contains` | `!strings.Contains(actual, value)` | `assertion_not_contains.go` |
-| `present` | field exists and `actual != ""` | `assertion_present.go` |
-| `matches` | `regexp.MatchString(value, actual)` | `assertion_matches.go` |
-
-All other types (`array_contains`, `map_contains`, `length`, `int_eq/gt/gte/lt/lte`) belong to `response_assertions` only (`internal/adapters/secondary/assertions/trigger:46`, 13 types) and are documented in [Response Assertions](#response-assertions) — they do **not** exist for `receivers[].assertions`.
-
-**Field namespaces** — `field` is a plain `Fields[field]` lookup lowercased at ingestion (`httputil/payload.go:66`, `providers/generic.go:54`):
-
-| Receiver | `field` examples | Populated by |
-|---|---|---|
-| `webhook` | `headers.x-provider`, `headers.content-type`, `query.status`, `body.data.order_id`, `body.status`, `method` | `providers/generic.go:49-61` — `headers.<name>` from `req.Header`, `query.<name>` from `req.URL.Query()`, `body.<path>` flattened JSON via `ExtractFields`/`FlattenJSON` (bare `data.order_id` also kept at `generic.go:50`), form `body.<field>` via `ParseForm`, `method` from `req.Method` |
-| `api` | `body.data.status`, `body.data.order_id`, `headers.content-type` | `receiver/api/receiver.go:174-197` — flattened polled response body (lowercased dot paths); prefer `body.*` |
-| `imap` | `subject`, `body`, `from`, `to` | `receiver/imap` — parsed email fields |
-
-Use **lowercase** in `field` (`headers.x-provider` not `headers.X-Provider`).
-
+Use `assertions` inside a receiver to validate the collected `domain.Message`. See [Assertions](#assertions) for all 13 types and webhook/API/IMAP field namespaces.
 ### Receiver Options
 
 Some receivers (like `imap`) require connection-specific configuration that can vary per test. Use the `options` block inside the receiver definition to pass any key-value configuration. These options are passed directly to the receiver factory, so each test can target a different server:
@@ -1011,7 +950,7 @@ It works with two components:
    within the configured `timeout` budget, then runs `assertions` against the captured
    fields.
 
-All assertion field namespaces and types are documented centrally in [Receiver Assertions](#receiver-assertions-assertions).
+All assertion field namespaces and types are documented centrally in [Assertions](#assertions).
 
 **Run ID resolution order:**
 
@@ -1049,7 +988,7 @@ The app must callback to:
 
 `POST {{WEBHOOK_BASE_URL}}/webhook/generic?run_id={{run_id}}`
 
-For the full field reference (`headers.*` / `query.*` / `body.*` / `method`) and the 5 assertion types see [Receiver Assertions](#receiver-assertions-assertions).
+For the full field reference (`headers.*` / `query.*` / `body.*` / `method`) and the 13 assertion types see [Assertions](#assertions).
 
 > **Tip `async` + `wait_for_receivers`:** if the webhook has a long `timeout`, set `async: true` at the test level. `POST /run` will return `202 {run_id, status:"running"}` instantly even if the trigger has `wait_for_receivers: true`; the `wait` continues in background and you poll `GET /results/{run_id}`. See [Async Mode](#async-mode-asynctrue).
 
@@ -1102,7 +1041,7 @@ triggers:
     wait_for_receivers: true
 ```
 
-> **Poll vs receive:** `response_assertions` decide *when to stop polling* (retried); `assertions` decide *whether the final message is correct* (failed once). Field namespaces and the 5 receiver assertion types are documented in [Receiver Assertions](#receiver-assertions-assertions).
+> **Poll vs receive:** `response_assertions` decide *when to stop polling* (retried); `assertions` decide *whether the final message is correct* (failed once). Field namespaces and the 5 receiver assertion types are documented in [Assertions](#assertions).
 
 **Fields:**
 

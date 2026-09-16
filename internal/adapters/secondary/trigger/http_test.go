@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/core/domain"
+	assertpkg "e2e-framework/internal/pkg/assertion"
 	"e2e-framework/internal/pkg/httputil"
 )
 
@@ -29,7 +29,7 @@ func TestRunResponseAssertions(t *testing.T) {
 		value string
 	}
 
-	reg := triggerasserts.NewDefaultTriggerAssertionRegistry()
+	reg := assertpkg.NewDefaultRegistry()
 	run := func(t *testing.T, payload any, vars map[string]string, a assertion) error {
 		t.Helper()
 		raw := mustJSON(payload)
@@ -313,7 +313,10 @@ func TestExecute_AbortsOnUnresolvedIncrement(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := NewHTTPTrigger(nil)
+	tr, err := NewHTTPTrigger(assertpkg.NewDefaultRegistry())
+	if err != nil {
+		t.Fatalf("NewHTTPTrigger: %v", err)
+	}
 	vars := map[string]string{"broken": "abc"}
 
 	t.Run("unresolved in url", func(t *testing.T) {
@@ -344,9 +347,12 @@ func TestExecute_IncrementCreatesMissingVar(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := NewHTTPTrigger(nil)
+	tr, err := NewHTTPTrigger(assertpkg.NewDefaultRegistry())
+	if err != nil {
+		t.Fatalf("NewHTTPTrigger: %v", err)
+	}
 	vars := map[string]string{}
-	_, err := tr.Execute(context.Background(), domain.TriggerConfig{
+	_, err = tr.Execute(context.Background(), domain.TriggerConfig{
 		URL: srv.URL + "/{{++(fresh)}}",
 	}, "run-1", vars)
 	if err != nil {

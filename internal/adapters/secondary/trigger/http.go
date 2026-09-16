@@ -10,26 +10,26 @@ import (
 	"net/url"
 	"strings"
 
-	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/assertion"
 	"e2e-framework/internal/pkg/httputil"
 	"e2e-framework/internal/pkg/template"
 )
 
 type HTTPTrigger struct {
 	client     *http.Client
-	assertions *triggerasserts.TriggerAssertionRegistry
+	assertions *assertion.Registry
 }
 
-func NewHTTPTrigger(registry *triggerasserts.TriggerAssertionRegistry) *HTTPTrigger {
+func NewHTTPTrigger(registry *assertion.Registry) (*HTTPTrigger, error) {
 	if registry == nil {
-		registry = triggerasserts.NewDefaultTriggerAssertionRegistry()
+		return nil, fmt.Errorf("%w: assertion registry is required", domain.ErrConfiguration)
 	}
 
 	return &HTTPTrigger{
 		client:     &http.Client{},
 		assertions: registry,
-	}
+	}, nil
 }
 
 func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, runID string, vars map[string]string) (map[string]string, error) {
@@ -135,8 +135,18 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 
 	flatResp := httputil.FlattenJSON(respPayload)
 
-	if err := t.assertions.Run(def.ResponseAssertions, flatResp, rawResp, vars); err != nil {
-		return nil, err
+	// Unified assertions: same 13 types as receivers, same lowercased Fields + gjson on Raw
+	for _, acfg := range def.ResponseAssertions {
+		acfg.Field = template.ReplaceString(acfg.Field, vars)
+		acfg.Value = template.ReplaceString(acfg.Value, vars)
+		a, err := t.assertions.Create(acfg)
+		if err != nil {
+			return nil, fmt.Errorf("%w: assertion failed: %v | response body: %s", domain.ErrTriggerFailed, err, rawResp)
+		}
+		msg := &domain.Message{Fields: flatResp, Raw: rawResp}
+		if err := a.Assert(msg); err != nil {
+			return nil, fmt.Errorf("%w: assertion failed: %v | response body: %s", domain.ErrTriggerFailed, err, rawResp)
+		}
 	}
 
 	extracted := make(map[string]string, len(def.Extract))

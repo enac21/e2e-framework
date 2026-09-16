@@ -100,7 +100,7 @@ triggers: # sequential steps; [] → StatusPassed (no work)
         timeout: 60s # default 0 → no timeout (poll forever); webhook polls 1s (receiver/webhook/receiver.go:34)
         recipient: "" # default "" → skip Reserve; else Reserve channel+recipient 1h TTL
         # options: {} # imap: host/port required, mailbox default INBOX, tls false; webhook: ignored
-        assertions: # receiver registry — 5 types: contains/equals/matches/present/not_contains (receiver/assertion_registry.go:26)
+        assertions: # centralized 13 types in internal/pkg/assertion (single registry for trigger + receiver)
           - type: contains # headers.* lowercased
             field: headers.x-provider
             value: "acme"
@@ -121,6 +121,21 @@ triggers: # sequential steps; [] → StatusPassed (no work)
           - type: matches
             field: body.data.created_at
             value: ".*"
+          - type: array_contains # gjson path — any element equals value
+            field: body.items.#.name
+            value: "widget"
+          - type: map_contains # gjson @values — any dynamic-key value equals
+            field: body.labels.@values
+            value: "prod"
+          - type: length # array length via __len__
+            field: body.tags
+            value: "2"
+          - type: int_eq
+            field: body.quantity
+            value: "3"
+          - type: int_gt
+            field: body.priority
+            value: "5"
           - type: equals # method of the callback that hit /webhook/generic
             field: method
             value: "POST"
@@ -157,10 +172,19 @@ triggers: # sequential steps; [] → StatusPassed (no work)
             value: "paid"
         extract: # accepted by schema but NOT merged back into run variables yet (planned)
           payment_id: "data.payment_id"
-        assertions: # receiver assertions (5 types) against flattened polled body — see README "Receiver Assertions"
+        assertions: # centralized 13 types — same as response_assertions, see README "Receiver Assertions"
           - type: contains
             field: body.data.status
             value: "paid"
+          - type: array_contains
+            field: body.items.#.name
+            value: "widget"
+          - type: length
+            field: body.tags
+            value: "2"
+          - type: int_gt
+            field: body.priority
+            value: "5"
           - type: equals
             field: body.data.order_id
             value: "{{item_id}}"

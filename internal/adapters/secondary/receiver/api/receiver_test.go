@@ -13,12 +13,13 @@ import (
 
 	"e2e-framework/internal/adapters/secondary/receiver/api"
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/assertion"
 )
 
 func newReceiver(t *testing.T, cfg domain.ReceiverConfig) *api.APIPollingReceiver {
 	t.Helper()
 
-	r, err := api.NewAPIPollingReceiver(cfg, nil, nil)
+	r, err := api.NewAPIPollingReceiver(cfg, assertion.NewDefaultRegistry(), &http.Client{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,7 +237,7 @@ func TestCollect_SubstitutesVarsInURLHeadersBody(t *testing.T) {
 }
 
 func TestCollect_NotStarted(t *testing.T) {
-	r, err := api.NewAPIPollingReceiver(domain.ReceiverConfig{URL: "http://example.com"}, nil, nil)
+	r, err := api.NewAPIPollingReceiver(domain.ReceiverConfig{URL: "http://example.com"}, assertion.NewDefaultRegistry(), &http.Client{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

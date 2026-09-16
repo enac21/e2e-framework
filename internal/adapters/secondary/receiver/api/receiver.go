@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	triggerasserts "e2e-framework/internal/adapters/secondary/assertions/trigger"
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/assertion"
 	"e2e-framework/internal/pkg/httputil"
 	"e2e-framework/internal/pkg/template"
 )
@@ -26,26 +26,24 @@ const defaultInterval = 5 * time.Second
 // (managed by the orchestrator through the Collect context) fails the run.
 type APIPollingReceiver struct {
 	cfg        domain.ReceiverConfig
-	assertions *triggerasserts.TriggerAssertionRegistry
+	assertions *assertion.Registry
 	client     *http.Client
 	runID      string
 	vars       map[string]string
 }
 
 // NewAPIPollingReceiver builds the receiver and validates its configuration.
-// A nil assertion registry falls back to the defaults; a nil client is replaced
-// with a standard one (tests inject one pointing at a local test server).
-func NewAPIPollingReceiver(cfg domain.ReceiverConfig, registry *triggerasserts.TriggerAssertionRegistry, client *http.Client) (*APIPollingReceiver, error) {
+func NewAPIPollingReceiver(cfg domain.ReceiverConfig, registry *assertion.Registry, client *http.Client) (*APIPollingReceiver, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("%w: api receiver requires 'url'", domain.ErrConfiguration)
 	}
 
 	if registry == nil {
-		registry = triggerasserts.NewDefaultTriggerAssertionRegistry()
+		return nil, fmt.Errorf("%w: assertion registry is required", domain.ErrConfiguration)
 	}
 
 	if client == nil {
-		client = &http.Client{}
+		return nil, fmt.Errorf("%w: http client is required", domain.ErrConfiguration)
 	}
 
 	return &APIPollingReceiver{
