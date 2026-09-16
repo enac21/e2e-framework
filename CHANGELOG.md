@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/enac21/e2e-framework/compare/v0.2.0...v0.3.0) (2026-09-16)
+
+
+### Features
+
+* **api:** named test groups (test_group) for /run-sequence ([2ac4bb2](https://github.com/enac21/e2e-framework/commit/2ac4bb26e44c0fc07621fca71df603e0a73cc7d4))
+* assertions centralization ([bf02e2a](https://github.com/enac21/e2e-framework/commit/bf02e2a7f214f94ccde8da0c404c422ff6dc9ee5))
+* generic receiver provider & providers standarization ([d0f169b](https://github.com/enac21/e2e-framework/commit/d0f169ba249467bbb33f99b9265668f502002547))
+* int response assertions, increment operator & default zero for missing vars ([6efb41e](https://github.com/enac21/e2e-framework/commit/6efb41e29af6121ea18dd2df4714e8f635e63b0a))
+* **receiver:** add api polling receiver with outbound requests ([aad4e47](https://github.com/enac21/e2e-framework/commit/aad4e479c1124d87fc029da99e278bbd24f5af18))
+* **store:** pluggable store backends (redis/postgres/memory/none) ([e863a08](https://github.com/enac21/e2e-framework/commit/e863a08706b1ce8ba5825667e0f9e3726025244b))
+* variables section & readme adjust ([3f35c62](https://github.com/enac21/e2e-framework/commit/3f35c625427c7d464aae1acd06e4c364df1cf7ed))
+* variables section & README adjust ([29311bd](https://github.com/enac21/e2e-framework/commit/29311bd85896e9fa0c9443b68bb721dc2ea92b43))
+
 ## [0.2.0](https://github.com/enac21/e2e-framework/compare/v0.1.1...v0.2.0) (2026-08-09)
 
 
