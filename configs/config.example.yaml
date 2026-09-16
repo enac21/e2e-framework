@@ -6,37 +6,37 @@ version: "1"
 
 server:
   port: 8080
-  timeout: 30s
 
 auth:
   enabled: true
   jwt_secret: "{{env.JWT_SECRET}}"
 
 store:
+  type: redis        # redis | postgres | memory | disabled   (default: redis)
   redis:
     url: "{{env.REDIS_URL}}"
     ttl: 300s
     username: "{{env.REDIS_USERNAME}}"
     password: "{{env.REDIS_PASSWORD}}"
     cluster_mode: false
-
-scheduler:
-  enabled: true
-  timezone: "Europe/Madrid"
+  postgres:
+    dsn: "{{env.POSTGRES_DSN}}"
+    ttl: 300s
+  memory:
+    ttl: 300s
 
 tests:
   path: "tests"
 
-receivers:
-  sms:
-    provider: twilio
-    # fields TBD during SmsReceiver implementation
-  push:
-    provider: fcm
-    # fields TBD during PushReceiver implementation
-  webhook:
-    base_url: "{{env.WEBHOOK_BASE_URL}}"
-
-logging:
-  level: info       # debug | info | warn | error
-  format: json      # json (production) | text (local)
+test_groups:
+  ci:
+    description: "Pipeline that runs after every merge"
+    tests:
+      - local_loop_test
+      - example_variables
+      - example_increment_int_assertions
+    test_delay: 2s
+    skip_fail_test: true
+  smoke:
+    tests:
+      - local_loop_test

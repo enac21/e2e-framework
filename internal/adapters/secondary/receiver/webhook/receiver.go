@@ -1,4 +1,4 @@
-package request
+package webhook
 
 import (
 	"context"
@@ -9,24 +9,24 @@ import (
 	"e2e-framework/internal/core/ports"
 )
 
-type RequestReceiver struct {
+type WebhookReceiver struct {
 	store ports.Store
 	runID string
 }
 
-func NewRequestReceiver(store ports.Store) *RequestReceiver {
-	return &RequestReceiver{
+func NewWebhookReceiver(store ports.Store) *WebhookReceiver {
+	return &WebhookReceiver{
 		store: store,
 	}
 }
 
-func (r *RequestReceiver) Start(ctx context.Context, runID string) error {
+func (r *WebhookReceiver) Start(ctx context.Context, runID string, vars map[string]string) error {
 	r.runID = runID
 
 	return nil
 }
 
-func (r *RequestReceiver) Collect(ctx context.Context) (*domain.Message, error) {
+func (r *WebhookReceiver) Collect(ctx context.Context) (*domain.Message, error) {
 	if r.runID == "" {
 		return nil, fmt.Errorf("%w: receiver not started", domain.ErrConfiguration)
 	}
@@ -39,7 +39,7 @@ func (r *RequestReceiver) Collect(ctx context.Context) (*domain.Message, error) 
 		case <-ctx.Done():
 			return nil, fmt.Errorf("%w: timeout waiting for webhook message: %v", domain.ErrTimeout, ctx.Err())
 		case <-ticker.C:
-			msg, err := r.store.Claim(ctx, r.runID, domain.RequestReceiverType)
+			msg, err := r.store.Claim(ctx, r.runID, domain.WebhookReceiverType)
 			if err != nil {
 				return nil, fmt.Errorf("%w: failed to claim message from store: %v", domain.ErrInternal, err)
 			}
@@ -51,6 +51,6 @@ func (r *RequestReceiver) Collect(ctx context.Context) (*domain.Message, error) 
 	}
 }
 
-func (r *RequestReceiver) Stop() error {
+func (r *WebhookReceiver) Stop() error {
 	return nil
 }

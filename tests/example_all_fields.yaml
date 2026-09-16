@@ -1,0 +1,253 @@
+# Exhaustive reference test — every field + its default annotated.
+# This file is the single source of truth for the YAML schema.
+# It is NOT run in CI (enabled: false). Read it top-to-bottom as documentation.
+# Defaults are documented in trailing `# default:` comments and must match the
+# code truth table in README.md "Field reference (defaults)" and
+# docs/plan_documentation.md §3.7.
+version: "1" # informational, no validation
+id: example_all_fields
+description: "Exhaustive reference — every field + default annotated. enabled:false so CI never runs it."
+
+# ── Test-level ──────────────────────────────────────────────────────────
+enabled: false # default false — must be true to run; false → StatusSkipped (orchestrator.go:104)
+async: false # default false (sync 200 + TestResult); true → 202 {run_id,status:"running"} + poll GET /results/{run_id} (api/server.go:170)
+schedule: "*/5 * * * *" # default "" → not scheduled; if set, 5-field cron Minute|Hour|Dom|Month|Dow (cron/scheduler.go:22)
+
+# Reserved names run_id/test_id/error cannot be defined here (orchestrator.go:134)
+variables: # resolved once per run; stays stable for whole test (variables: block)
+  base_url: "{{env.BASE_URL}}" # env var resolved at load time (config/loader.go)
+  request_id: "{{uuid()}}" # one-shot stable vs inline {{uuid()}} per-occurrence
+  otp_code: "{{randomInt(6)}}" # 6-digit randomInt(N) → [0, 10^N)
+  counter: 0 # used by {{++(counter)}} / {{--(counter)}} stateful operators
+
+# Anchor — reused via <<: *post_json (merge, allows override) or *post_json (full replace)
+# The x- prefix keeps the anchor block out of the domain schema.
+x-post-json: &post_json
+  method: POST # default GET when omitted (trigger/http.go:44)
+  timeout: 10s # default 0 → no deadline (parent ctx only) (trigger/http.go:87)
+  headers: # default nil → no headers; templated via template.ReplaceHeaders
+    Content-Type: application/json
+  wait_for_receivers: true # default false — fire-and-forget when false (orchestrator.go:203)
+
+retry: # global retry — only trigger/receiver failures are retried; config errors never retried
+  enabled: false # default false → 1 attempt regardless of attempts/delay (orchestrator.go:168)
+  attempts: 3 # effective only if enabled && attempts>1
+  delay: 5s # default 0 → instant; sleep between attempts (Go duration string)
+
+triggers: # sequential steps; [] → StatusPassed (no work)
+  # ── Trigger 1: creation + receiver assertions ─────────────────────────
+  - <<: *post_json # type:""→"http" via EffectiveType() (domain/test.go:46); options nil (ignored by http trigger)
+    type: http # default "http"; only http bundled; unknown → ErrConfiguration (trigger/registry.go:31)
+    # options: {} # OptionsMap — coerced to string via fmt.Sprintf; ignored by http, reserved for custom triggers
+    url: "{{base_url}}/v1/items" # required; "" or unresolved {{var}} → ErrTriggerFailed before request
+    delay_before: 0s # default 0 → no sleep; runs once before first attempt only (orchestrator.go:144)
+    headers: # merged from anchor, overridden here if needed
+      Content-Type: application/json
+      X-Request-ID: "{{request_id}}"
+    body: # default nil → no body; JSON marshalled unless Content-Type is application/x-www-form-urlencoded → url.Values
+      name: "widget"
+      request_id: "{{request_id}}" # stable (from variables:)
+      inline_uuid: "{{uuid()}}" # per-occurrence generator — fresh value each time
+      seq: "{{++(counter)}}" # stateful: increments counter 0→1 and persists
+    extract: # map[variable]jsonPath — case-insensitive dot paths; missing path → silently omitted
+      item_id: "id"
+      item_name: "name"
+      org_slug: "organization.slug"
+    expected_status: 201 # default 0 → pass 2xx/3xx, fail ≥400; >0 → exact match only (trigger/http.go:108)
+    response_assertions: # trigger assertion registry — 11 types (trigger/assertion_registry.go:46)
+      - type: equals # value is exactly value (dot-path, case-insensitive lookup)
+        field: status
+        value: "pending"
+      - type: contains # value contains substring
+        field: name
+        value: "widget"
+      - type: not_contains
+        field: error
+        value: "failed"
+      - type: present # field exists and non-empty
+        field: id
+      - type: matches # value matches regex
+        field: created_at
+        value: ".*"
+      - type: array_contains # gjson path — any element equals value; supports nested arrays
+        field: items.#.name
+        value: "widget"
+      - type: map_contains # gjson @values — any value in dynamic-key object equals value
+        field: labels.@values
+        value: "prod"
+      - type: length # array has exactly N elements
+        field: tags
+        value: "2"
+      - type: int_eq # numeric comparisons (int64, whitespace-trimmed)
+        field: quantity
+        value: "3"
+      - type: int_gt
+        field: quantity
+        value: "0"
+      - type: int_gte
+        field: quantity
+        value: "3"
+      - type: int_lt
+        field: quantity
+        value: "10"
+      - type: int_lte
+        field: quantity
+        value: "10"
+    receivers: # [] + wait_for_receivers:false → fire-and-forget
+      # Receiver assertions run against the collected domain.Message Fields (see README "Receiver Assertions").
+      # For webhook: headers.* / query.* / body.* / method (generic.go:49). For api/imap: flattened body.
+      - type: webhook # webhook|imap|api — unknown → ErrConfiguration (receiver/registry.go:31)
+        timeout: 60s # default 0 → no timeout (poll forever); webhook polls 1s (receiver/webhook/receiver.go:34)
+        recipient: "" # default "" → skip Reserve; else Reserve channel+recipient 1h TTL
+        # options: {} # imap: host/port required, mailbox default INBOX, tls false; webhook: ignored
+        assertions: # centralized 13 types in internal/pkg/assertion (single registry for trigger + receiver)
+          - type: contains # headers.* lowercased
+            field: headers.x-provider
+            value: "acme"
+          - type: equals # query.* lowercased
+            field: query.status
+            value: "confirmed"
+          - type: present
+            field: query.lang
+          - type: contains # body.* flattened JSON (lowercased dot paths)
+            field: body.data.order_id
+            value: "order"
+          - type: equals
+            field: body.status
+            value: "paid"
+          - type: not_contains
+            field: body.error
+            value: "failed"
+          - type: matches
+            field: body.data.created_at
+            value: ".*"
+          - type: array_contains # gjson path — any element equals value
+            field: body.items.#.name
+            value: "widget"
+          - type: map_contains # gjson @values — any dynamic-key value equals
+            field: body.labels.@values
+            value: "prod"
+          - type: length # array length via __len__
+            field: body.tags
+            value: "2"
+          - type: int_eq
+            field: body.quantity
+            value: "3"
+          - type: int_gt
+            field: body.priority
+            value: "5"
+          - type: equals # method of the callback that hit /webhook/generic
+            field: method
+            value: "POST"
+          - type: contains # variable substitution in value
+            field: body.message_id
+            value: "{{run_id}}"
+      - type: imap # requires options
+        timeout: 60s
+        recipient: "qa@company.com" # Reserve example
+        options: # all values coerced to string via OptionsMap (domain/test.go:74)
+          host: imap.company.com # required
+          port: "993" # required, must be integer
+          username: qa@company.com
+          password: secret
+          mailbox: INBOX # default INBOX when empty (receiver/imap/receiver.go:40)
+          tls: "true" # default false (ParseBool)
+        assertions:
+          - type: contains
+            field: subject
+            value: "{{request_id}}"
+      - type: api # outbound polling — transient failures retried until timeout
+        interval: 5s # default 5s when 0 (receiver/api/receiver.go:20); polling cadence
+        timeout: 60s # overall budget; timeout → ErrTimeout
+        method: GET # default GET (receiver/api/receiver.go:104)
+        url: "{{base_url}}/v1/orders/{{item_id}}" # required for api (receiver/api/receiver.go:39)
+        headers: # templated
+          Authorization: "Bearer {{env.API_TOKEN}}"
+        body: # nil → no body; same JSON vs form rule as triggers
+          check: true
+        expected_status: 200 # default 0 → fail ≥400; >0 → exact match
+        response_assertions: # same 11 types, evaluated each poll
+          - type: equals
+            field: status
+            value: "paid"
+        extract: # accepted by schema but NOT merged back into run variables yet (planned)
+          payment_id: "data.payment_id"
+        assertions: # centralized 13 types — same as response_assertions, see README "Receiver Assertions"
+          - type: contains
+            field: body.data.status
+            value: "paid"
+          - type: array_contains
+            field: body.items.#.name
+            value: "widget"
+          - type: length
+            field: body.tags
+            value: "2"
+          - type: int_gt
+            field: body.priority
+            value: "5"
+          - type: equals
+            field: body.data.order_id
+            value: "{{item_id}}"
+          - type: present
+            field: body.data.payment_id
+          - type: not_contains
+            field: body.error
+            value: "failed"
+    wait_for_receivers: true # default false — true → orchestrator collects in parallel until timeout
+
+  # ── Trigger 2: verify + delay_before + URL interpolation ─────────────
+  - method: GET # default GET
+    url: "{{base_url}}/v1/items/{{item_id}}" # uses extract from previous step
+    timeout: 10s
+    delay_before: 3s # example: wait 3s for async propagation before firing (Go duration)
+    expected_status: 200
+    extract:
+      verify_name: "name"
+    response_assertions:
+      - type: equals
+        field: id
+        value: "{{item_id}}" # variable substitution in assertion value
+      - type: int_eq
+        field: id
+        value: "{{item_id}}"
+    receivers:
+      - type: webhook
+        timeout: 15s
+        assertions:
+          - type: equals
+            field: body.status
+            value: "delivered"
+    wait_for_receivers: true
+
+  # ── Trigger 3: stateful counter in URL + body ────────────────────────
+  - method: POST
+    url: "{{base_url}}/v1/items/{{++(counter)}}/decrement/{{--(counter)}}"
+    timeout: 10s
+    headers:
+      Content-Type: application/json
+    body:
+      seq_after: "{{counter}}" # sees persisted value after the two ops above
+    expected_status: 200
+
+on_failure: # async after all retries exhausted; Result passed/skipped → no-op; calls run sequentially
+  calls: # default [] → no-op
+    - method: POST # default POST (differs from trigger GET) (notifier/http.go:66)
+      url: "https://hooks.slack.com/services/XXX" # unresolved {{var}} → call skipped, warning logged (notifier/http.go:84)
+      timeout: 10s # default 15s when 0 (notifier/http.go:18)
+      delay_before: 2s # default 0 → no sleep
+      expected_status: 201 # default 0 → only ≥400 check; >0 → exact match
+      headers:
+        Content-Type: application/json # auto application/json if body present & no CT (notifier/http.go:112)
+      body: # templated via template.ReplaceMap; supports generators too
+        test_id: "{{test_id}}" # built-in vars: run_id, test_id, error
+        run_id: "{{run_id}}"
+        error: "{{error}}" # failure context (aggregated receiver errors or trigger error)
+        item_id: "{{item_id}}" # any extract that completed before failure
+        alert_id: "{{uuid()}}" # generators work here too
+    - method: POST
+      url: "https://alerts.company.com/tickets"
+      timeout: 15s
+      body:
+        test_id: "{{test_id}}"
+        run_id: "{{run_id}}"
+        error: "{{error}}"

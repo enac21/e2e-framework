@@ -1,4 +1,4 @@
-package trigger
+package assertion
 
 import (
 	"testing"
@@ -81,9 +81,9 @@ func TestWalkFind(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := walkFind(gjson.Get(tc.json, tc.path), tc.target)
+			got := WalkFind(gjson.Get(tc.json, tc.path), tc.target)
 			if got != tc.want {
-				t.Errorf("walkFind(%q, %q) = %v, want %v", tc.path, tc.target, got, tc.want)
+				t.Errorf("WalkFind(%q, %q) = %v, want %v", tc.path, tc.target, got, tc.want)
 			}
 		})
 	}
