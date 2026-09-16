@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -11,15 +12,18 @@ import (
 )
 
 type Server struct {
-	store      ports.Store
+	ingestor   ports.MessageIngestor
 	extractors map[string]ports.Extractor
 }
 
-func NewServer(store ports.Store) *Server {
-	return &Server{
-		store:      store,
-		extractors: make(map[string]ports.Extractor),
+func NewServer(ingestor ports.MessageIngestor) (*Server, error) {
+	if ingestor == nil {
+		return nil, fmt.Errorf("%w: message ingestor is required", domain.ErrConfiguration)
 	}
+	return &Server{
+		ingestor:   ingestor,
+		extractors: make(map[string]ports.Extractor),
+	}, nil
 }
 
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
@@ -71,15 +75,12 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if msg.RunID == "" || msg.RunID == "unknown" {
-		w.WriteHeader(http.StatusBadRequest)
-
-		return
-	}
-
-	if err := s.store.Deposit(ctx, msg); err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-
+	if err := s.ingestor.Ingest(ctx, msg); err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		} else {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 

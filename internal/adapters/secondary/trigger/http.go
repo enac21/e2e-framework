@@ -11,23 +11,27 @@ import (
 	"strings"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/pkg/assertion"
 	"e2e-framework/internal/pkg/httputil"
 	"e2e-framework/internal/pkg/template"
 )
 
 type HTTPTrigger struct {
-	client     *http.Client
+	client     ports.HttpClient
 	assertions *assertion.Registry
 }
 
-func NewHTTPTrigger(registry *assertion.Registry) (*HTTPTrigger, error) {
+func NewHTTPTrigger(registry *assertion.Registry, client ports.HttpClient) (*HTTPTrigger, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("%w: assertion registry is required", domain.ErrConfiguration)
 	}
+	if client == nil {
+		return nil, fmt.Errorf("%w: http client is required", domain.ErrConfiguration)
+	}
 
 	return &HTTPTrigger{
-		client:     &http.Client{},
+		client:     client,
 		assertions: registry,
 	}, nil
 }

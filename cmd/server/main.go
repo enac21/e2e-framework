@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -79,10 +80,11 @@ func main() {
 	log.Printf("Store initialized with type: %s", cfg.Store.Type)
 
 	assertionRegistry := assertion.NewDefaultRegistry()
+	httpClient := &http.Client{Timeout: 30 * time.Second}
 
 	triggerRegistry := trigger.NewTriggerRegistry()
 	triggerRegistry.Register(domain.HTTPTriggerType, func(options map[string]string) (ports.Trigger, error) {
-		return trigger.NewHTTPTrigger(assertionRegistry)
+		return trigger.NewHTTPTrigger(assertionRegistry, httpClient)
 	})
 
 	httpNotifier := notifier.NewHTTPNotifier()
@@ -103,7 +105,7 @@ func main() {
 	receiverRegistry.Register(
 		domain.APIReceiverType,
 		func(cfg domain.ReceiverConfig) (ports.Receiver, error) {
-			return receiverapi.NewAPIPollingReceiver(cfg, assertionRegistry, &http.Client{})
+			return receiverapi.NewAPIPollingReceiver(cfg, assertionRegistry, httpClient)
 		},
 	)
 
@@ -130,7 +132,15 @@ func main() {
 		Resolver:   groupResolver,
 	}, orchestrator, tests)
 
-	whServer := webhook.NewServer(s)
+	ingestor, err := services.NewIngestor(s)
+	if err != nil {
+		log.Fatalf("failed to create ingestor: %v", err)
+	}
+
+	whServer, err := webhook.NewServer(ingestor)
+	if err != nil {
+		log.Fatalf("failed to create webhook server: %v", err)
+	}
 	whServer.RegisterExtractor("twilio", webhookproviders.NewTwilioExtractor())
 	whServer.RegisterExtractor("meta", webhookproviders.NewMetaExtractor())
 	whServer.RegisterExtractor("generic", webhookproviders.NewGenericExtractor())

@@ -15,19 +15,22 @@ adapters/primary   →   core/services   →   ports   ←   adapters/secondary
 ```
 
 - **`core/`** — Business logic and domain models. Zero external dependencies.
-- **`core/ports/`** — Interfaces that define contracts between the domain and the outside world.
-- **`adapters/primary/`** — Drive the domain (HTTP API, webhook server, cron scheduler).
-- **`adapters/secondary/`** — Driven by the domain (trigger, receivers, store, notifier).
-- **`cmd/server/main.go`** — Wiring only. All dependency injection happens here.
+- **`core/ports/`** — Interfaces that define contracts between the domain and the outside world (`Trigger`, `Receiver`, `Store`, `Assertion`, `HttpClient`, `MessageIngestor`).
+- **`core/services/`** — Use cases (`Orchestrator`, `Ingestor`) that orchestrate ports.
+- **`adapters/primary/`** — Drive the domain (HTTP API, webhook server via `MessageIngestor`, cron scheduler).
+- **`adapters/secondary/`** — Driven by the domain (trigger via `HttpClient`+`Assertion`, receivers, store, notifier).
+- **`cmd/server/main.go`** — Wiring only. All dependency injection happens here (`storeRegistry`/`assertionRegistry`/`triggerRegistry`/`receiverRegistry` + `httpClient` + `ingestor`).
 
 ### Key Concepts
 
 | Concept | Description |
 |---------|-------------|
-| **Trigger** | Executes the initial HTTP call that starts the notification flow |
+| **Trigger** | Executes the initial HTTP call that starts the notification flow (via `HttpClient` port) |
 | **Receiver** | Waits for and collects feedback from a notification channel |
-| **Assertion** | Validates a field of a NormalizedMessage against an expected value |
-| **Store** | Redis-backed temporary buffer with TTL for received messages |
+| **Assertion** | Validates a field of a `domain.Message` (`internal/pkg/assertion`, 13 types, single `Registry` for triggers and receivers) |
+| **Store** | `ports.Store` temporary buffer with TTL for received messages |
+| **Ingestor** | `ports.MessageIngestor` use case that validates `run_id` and `Deposit`s into `Store` (webhook primary → ingestor, not store) |
+| **HttpClient** | `ports.HttpClient` port abstracting `*http.Client` for trigger and `api` receiver |
 | **Orchestrator** | Coordinates the full test lifecycle, only knows ports |
 | **Notifier** | Executes the `on_failure.calls` alerts when a test fails |
 
@@ -37,17 +40,18 @@ adapters/primary   →   core/services   →   ports   ←   adapters/secondary
 
 ```
 e2e-testing-service/
-├── cmd/server/main.go              # Wiring only
+├── cmd/server/main.go              # Wiring only (storeRegistry/assertionRegistry/triggerRegistry/receiverRegistry)
 ├── internal/
 │   ├── core/
 │   │   ├── domain/                 # Business models
-│   │   ├── ports/                  # Interface definitions
-│   │   └── services/               # Orchestrator
+│   │   ├── ports/                  # Interface definitions (Trigger, Receiver, Store, Assertion, HttpClient, MessageIngestor)
+│   │   └── services/               # Use cases (Orchestrator, Ingestor, GroupResolver)
+│   ├── pkg/assertion/              # Centralized 13 assertions (single Registry for trigger + receiver)
 │   └── adapters/
-│       ├── primary/                # HTTP API, webhook server, cron
-│       └── secondary/              # Trigger, receivers, assertions, store, notifier
-├── tests/                          # YAML test definitions (subdirectories supported)
-├── configs/config.yaml             # Global configuration
+│       ├── primary/                # HTTP API, webhook server (via MessageIngestor), cron
+│       └── secondary/              # Trigger (HttpClient), receivers (api/imap/webhook), store, notifier
+├── tests/                          # YAML test definitions (subdirectories supported, example_all_fields.yaml)
+├── configs/config.yaml             # Global configuration (only parsed keys, see Full config reference)
 ├── docker-compose.yml              # Redis + service
 ├── Dockerfile                      # Multi-stage build
 └── Makefile                        # Build/test/deploy targets

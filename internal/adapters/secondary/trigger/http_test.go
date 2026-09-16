@@ -313,7 +313,7 @@ func TestExecute_AbortsOnUnresolvedIncrement(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr, err := NewHTTPTrigger(assertpkg.NewDefaultRegistry())
+	tr, err := NewHTTPTrigger(assertpkg.NewDefaultRegistry(), &http.Client{})
 	if err != nil {
 		t.Fatalf("NewHTTPTrigger: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestExecute_IncrementCreatesMissingVar(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr, err := NewHTTPTrigger(assertpkg.NewDefaultRegistry())
+	tr, err := NewHTTPTrigger(assertpkg.NewDefaultRegistry(), &http.Client{})
 	if err != nil {
 		t.Fatalf("NewHTTPTrigger: %v", err)
 	}
