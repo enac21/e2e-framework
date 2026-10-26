@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/enac21/e2e-framework/compare/v0.3.0...v0.4.0) (2026-10-26)
+
+
+### Features
+
+* service logging ([a6f54ed](https://github.com/enac21/e2e-framework/commit/a6f54ed222419d4d8d8bbadcf2f9a2a70757a532))
+* service logging ([374a947](https://github.com/enac21/e2e-framework/commit/374a947b3a8f75c44c495ae5ebd63078f6ae2dc9))
+
 ## [0.3.0](https://github.com/enac21/e2e-framework/compare/v0.2.0...v0.3.0) (2026-09-16)
 
 
