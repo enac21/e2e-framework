@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
-	"log"
+	"errors"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -27,6 +29,7 @@ import (
 	"e2e-framework/internal/core/services"
 	"e2e-framework/internal/pkg/assertion"
 	"e2e-framework/internal/pkg/config"
+	"e2e-framework/internal/pkg/logger"
 )
 
 // @title e2e-framework API
@@ -34,17 +37,37 @@ import (
 // @description This is the API for the e2e-framework testing service.
 // @BasePath /
 func main() {
-	log.Println("Starting e2e-testing-service...")
-
 	cfgPath := os.Getenv("CONFIG_PATH")
 	if cfgPath == "" {
 		cfgPath = "configs/config.yaml"
 	}
 
+	// Bootstrap logger (info/json) until the config block is loaded; every
+	// package builds its own logger with logger.New("<component>") after
+	// logger.Configure has been called once here.
+	lg := logger.New("main")
+
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		lg.Fatal().
+			Str("config_path", cfgPath).
+			Err(err).
+			Msg("failed to load configuration")
 	}
+
+	if err := logger.Configure(cfg.Logging.Level, cfg.Logging.Format); err != nil {
+		lg.Fatal().
+			Err(err).
+			Msg("failed to configure logging")
+	}
+
+	lg = logger.New("main")
+
+	lg.Info().
+		Str("config_path", cfgPath).
+		Str("log_level", cfg.Logging.Level).
+		Str("log_format", cfg.Logging.Format).
+		Msg("service starting")
 
 	testsPath := cfg.Tests.Path
 	if testsPath == "" {
@@ -53,31 +76,79 @@ func main() {
 
 	tests, err := config.LoadTestDefinitions(testsPath)
 	if err != nil {
-		log.Fatalf("failed to load tests: %v", err)
+		lg.Fatal().
+			Str("tests_path", testsPath).
+			Err(err).
+			Msg("failed to load test definitions")
 	}
 
-	log.Printf("Loaded %d test definitions", len(tests))
+	lg.Info().
+		Int("tests_count", len(tests)).
+		Msg("test definitions loaded")
 
 	storeRegistry := store.NewStoreRegistry()
 	storeRegistry.Register("redis", func(cfg config.StoreConfig) (ports.Store, error) {
-		return store.NewRedisStore(cfg.Redis)
+		s, err := store.NewRedisStore(cfg.Redis)
+		if err != nil {
+			return nil, err
+		}
+
+		lg.Info().
+			Str(logger.AttrStoreType, "redis").
+			Str(logger.AttrHost, hostFromURL(cfg.Redis.URL)).
+			Msg("store connection established")
+
+		return s, nil
 	})
 	storeRegistry.Register("postgres", func(cfg config.StoreConfig) (ports.Store, error) {
-		return store.NewPostgresStore(cfg.Postgres)
+		s, err := store.NewPostgresStore(cfg.Postgres)
+		if err != nil {
+			return nil, err
+		}
+
+		lg.Info().
+			Str(logger.AttrStoreType, "postgres").
+			Msg("store connection established")
+
+		return s, nil
 	})
 	storeRegistry.Register("memory", func(cfg config.StoreConfig) (ports.Store, error) {
+		lg.Info().
+			Str(logger.AttrStoreType, "memory").
+			Msg("store connection established")
+
 		return store.NewMemoryStore(cfg.Memory), nil
 	})
 	storeRegistry.Register("disabled", func(cfg config.StoreConfig) (ports.Store, error) {
+		lg.Info().
+			Str(logger.AttrStoreType, "disabled").
+			Msg("store connection established")
+
 		return store.NewDisabledStore(), nil
 	})
 
 	s, err := storeRegistry.Create(cfg.Store)
 	if err != nil {
-		log.Fatalf("failed to create store: %v", err)
+		lg.Fatal().
+			Str(logger.AttrStoreType, cfg.Store.Type).
+			Err(err).
+			Msg("failed to create store")
 	}
-	defer s.Close()
-	log.Printf("Store initialized with type: %s", cfg.Store.Type)
+
+	defer func() {
+		if err := s.Close(); err != nil {
+			lg.Warn().
+				Str(logger.AttrStoreType, cfg.Store.Type).
+				Err(err).
+				Msg("failed to close store")
+
+			return
+		}
+
+		lg.Debug().
+			Str(logger.AttrStoreType, cfg.Store.Type).
+			Msg("store closed")
+	}()
 
 	assertionRegistry := assertion.NewDefaultRegistry()
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -120,7 +191,9 @@ func main() {
 
 	// Setup primary adapters
 	if err := config.ValidateTestGroups(cfg.TestGroups, tests); err != nil {
-		log.Fatalf("invalid test groups config: %v", err)
+		lg.Fatal().
+			Err(err).
+			Msg("invalid test groups configuration")
 	}
 
 	groupResolver := services.NewGroupResolver(cfg.TestGroups)
@@ -134,12 +207,16 @@ func main() {
 
 	ingestor, err := services.NewIngestor(s)
 	if err != nil {
-		log.Fatalf("failed to create ingestor: %v", err)
+		lg.Fatal().
+			Err(err).
+			Msg("failed to create ingestor")
 	}
 
 	whServer, err := webhook.NewServer(ingestor)
 	if err != nil {
-		log.Fatalf("failed to create webhook server: %v", err)
+		lg.Fatal().
+			Err(err).
+			Msg("failed to create webhook server")
 	}
 	whServer.RegisterExtractor("twilio", webhookproviders.NewTwilioExtractor())
 	whServer.RegisterExtractor("meta", webhookproviders.NewMetaExtractor())
@@ -150,7 +227,10 @@ func main() {
 	scheduler := cron.NewScheduler(orchestrator)
 	for _, t := range tests {
 		if err := scheduler.RegisterTest(t); err != nil {
-			log.Printf("Warning: failed to schedule test %s: %v", t.ID, err)
+			lg.Warn().
+				Str(logger.AttrTestID, t.ID).
+				Err(err).
+				Msg("failed to schedule test")
 		}
 	}
 
@@ -161,30 +241,50 @@ func main() {
 	g, gCtx := errgroup.WithContext(ctx)
 
 	// Start server (API + Webhook routes unified on single port)
-	log.Printf("Starting server on port %d", cfg.Server.Port)
+	lg.Info().Int("port", cfg.Server.Port).Msg("http server starting")
 	g.Go(func() error { return apiServer.Start() })
 
-	log.Println("Starting Cron scheduler")
+	lg.Info().Msg("scheduler starting")
 	scheduler.Start()
 
 	// Shutdown handlers
 	g.Go(func() error {
 		<-gCtx.Done()
-		log.Println("Shutting down server...")
+		lg.Info().Msg("http server stopping")
 		return apiServer.Stop()
 	})
 
 	g.Go(func() error {
 		<-gCtx.Done()
-		log.Println("Shutting down Cron scheduler...")
+		lg.Info().Msg("scheduler stopping")
 		scheduler.Stop()
 		return nil
 	})
 
-	log.Println("Service is running. Press CTRL-C to stop.")
-	if err := g.Wait(); err != nil {
-		log.Printf("Service stopped with error: %v", err)
+	lg.Info().Msg("service is running. press ctrl-c to stop.")
+
+	if err := g.Wait(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		lg.Error().Err(err).Msg("service stopped with error")
 	} else {
-		log.Println("Service stopped cleanly.")
+		lg.Info().Msg("service stopped cleanly")
 	}
+}
+
+// hostFromURL returns only the host part of a connection URL so credentials
+// and query parameters never reach the logs.
+func hostFromURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+
+	if _, _, err := net.SplitHostPort(u.Host); err == nil {
+		return u.Host
+	}
+
+	return u.Hostname()
 }

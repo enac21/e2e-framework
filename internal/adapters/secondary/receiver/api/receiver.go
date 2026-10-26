@@ -14,6 +14,7 @@ import (
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/assertion"
 	"e2e-framework/internal/pkg/httputil"
+	"e2e-framework/internal/pkg/logger"
 	"e2e-framework/internal/pkg/template"
 )
 
@@ -28,6 +29,7 @@ type APIPollingReceiver struct {
 	cfg        domain.ReceiverConfig
 	assertions *assertion.Registry
 	client     *http.Client
+	logger     *logger.Logger
 	runID      string
 	vars       map[string]string
 }
@@ -50,6 +52,7 @@ func NewAPIPollingReceiver(cfg domain.ReceiverConfig, registry *assertion.Regist
 		cfg:        cfg,
 		assertions: registry,
 		client:     client,
+		logger:     logger.New("receiver").With(logger.AttrReceiver, domain.APIReceiverType),
 	}, nil
 }
 
@@ -73,10 +76,23 @@ func (r *APIPollingReceiver) Collect(ctx context.Context) (*domain.Message, erro
 	var lastErr error
 
 	for {
+		attemptStart := time.Now()
 		msg, err := r.attempt(ctx)
+
 		if err == nil {
+			r.logger.Debug().
+				Str(logger.AttrRunID, r.runID).
+				Duration(logger.AttrDurationMS, time.Since(attemptStart)).
+				Msg("polling attempt completed")
+
 			return msg, nil
 		}
+
+		r.logger.Debug().
+			Str(logger.AttrRunID, r.runID).
+			Duration(logger.AttrDurationMS, time.Since(attemptStart)).
+			Err(err).
+			Msg("polling attempt failed")
 
 		lastErr = err
 

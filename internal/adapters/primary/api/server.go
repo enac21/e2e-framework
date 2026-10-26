@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,6 +14,7 @@ import (
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/core/services"
+	"e2e-framework/internal/pkg/logger"
 
 	_ "e2e-framework/docs"
 
@@ -34,6 +35,7 @@ type Server struct {
 	tests        map[string]domain.TestDefinition
 	results      map[string]*domain.TestResult
 	resultOrder  []string
+	logger       *logger.Logger
 	mu           sync.RWMutex
 }
 
@@ -58,32 +60,67 @@ func NewServer(cfg *Config, orchestrator *services.Orchestrator, tests map[strin
 		tests:        tests,
 		results:      make(map[string]*domain.TestResult),
 		resultOrder:  make([]string, 0),
+		logger:       logger.New("api"),
 	}
 
-	log.Printf("[HTTP API] Registered endpoint: GET /health")
-	mux.HandleFunc("/health", s.handleHealth)
-
-	log.Printf("[HTTP API] Registered endpoint: POST /run")
-	mux.HandleFunc("/run", s.authMiddleware(s.handleRun))
-
-	log.Printf("[HTTP API] Registered endpoint: POST /run-sequence")
-	mux.HandleFunc("/run-sequence", s.authMiddleware(s.handleRunSequence))
-
-	log.Printf("[HTTP API] Registered endpoint: GET /results")
-	mux.HandleFunc("/results", s.authMiddleware(s.handleResults))
-
-	log.Printf("[HTTP API] Registered endpoint: GET /results/{run_id}")
-	mux.HandleFunc("/results/", s.authMiddleware(s.handleResultByID))
-
-	log.Printf("[HTTP API] Registered endpoint: GET /swagger/*")
-	mux.Handle("/swagger/", s.authMiddleware(httpSwagger.WrapHandler.ServeHTTP))
+	s.registerRoute(mux, http.MethodGet, "/health", http.HandlerFunc(s.handleHealth))
+	s.registerRoute(mux, http.MethodPost, "/run", s.authMiddleware(s.handleRun))
+	s.registerRoute(mux, http.MethodPost, "/run-sequence", s.authMiddleware(s.handleRunSequence))
+	s.registerRoute(mux, http.MethodGet, "/results", s.authMiddleware(s.handleResults))
+	s.registerRoute(mux, http.MethodGet, "/results/{run_id}", s.authMiddleware(s.handleResultByID))
+	s.registerRoute(mux, http.MethodGet, "/swagger/*", s.authMiddleware(httpSwagger.WrapHandler.ServeHTTP))
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
-		Handler: mux,
+		Handler: s.loggingMiddleware(mux),
 	}
 
 	return s
+}
+
+// registerRoute wires a handler and logs a line per route with the exact
+// registration pattern.
+func (s *Server) registerRoute(mux *http.ServeMux, method, pattern string, handler http.Handler) {
+	mux.Handle(pattern, handler)
+
+	s.logger.Debug().
+		Str(logger.AttrMethod, method).
+		Str(logger.AttrPath, pattern).
+		Msg("http route registered")
+}
+
+// loggingMiddleware records one structured line per HTTP request with
+// method, path, status and duration. /health is logged at Debug to keep
+// probe noise out of production streams.
+func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		next.ServeHTTP(rec, r)
+
+		level := slog.LevelInfo
+		if r.URL.Path == "/health" {
+			level = slog.LevelDebug
+		}
+
+		s.logger.Event(level).
+			Str(logger.AttrMethod, r.Method).
+			Str(logger.AttrPath, r.URL.Path).
+			Int(logger.AttrRespStatus, rec.status).
+			Duration(logger.AttrDurationMS, time.Since(start)).
+			Msg("http request completed")
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
 }
 
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -100,6 +137,11 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		)
 
 		if token == "" {
+			s.logger.Warn().
+				Str(logger.AttrMethod, r.Method).
+				Str(logger.AttrPath, r.URL.Path).
+				Msg("unauthorized request")
+
 			http.Error(w, unauthorizedMessage, http.StatusUnauthorized)
 
 			return
@@ -133,6 +175,11 @@ func (s *Server) storeResult(res *domain.TestResult) {
 		oldest := s.resultOrder[0]
 		s.resultOrder = s.resultOrder[1:]
 		delete(s.results, oldest)
+
+		s.logger.Debug().
+			Str(logger.AttrRunID, oldest).
+			Int("max_results", maxStoredResults).
+			Msg("result evicted from cache")
 	}
 }
 
@@ -160,12 +207,17 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	def, ok := s.tests[id]
 	if !ok {
+		s.logger.Warn().
+			Str(logger.AttrTestID, id).
+			Str(logger.AttrPath, r.URL.Path).
+			Msg("test not found")
+
 		http.Error(w, fmt.Sprintf("test %q not found", id), http.StatusNotFound)
 
 		return
 	}
 
-	runID, resultCh := s.orchestrator.RunTest(ctx, def)
+	runID, resultCh := s.orchestrator.RunTest(ctx, def, logger.ApiFlow)
 
 	if def.Async {
 		s.storeResult(&domain.TestResult{
@@ -281,6 +333,11 @@ func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
 
 	if groupName := r.URL.Query().Get("test_group"); groupName != "" {
 		if s.cfg.Resolver == nil {
+			s.logger.Warn().
+				Str("group", groupName).
+				Str(logger.AttrPath, r.URL.Path).
+				Msg("test group not found")
+
 			http.Error(w, fmt.Sprintf("test group %q not found", groupName), http.StatusNotFound)
 
 			return
@@ -288,6 +345,11 @@ func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
 
 		resolved, ok := s.cfg.Resolver.Resolve(groupName)
 		if !ok {
+			s.logger.Warn().
+				Str("group", groupName).
+				Str(logger.AttrPath, r.URL.Path).
+				Msg("test group not found")
+
 			http.Error(w, fmt.Sprintf("test group %q not found", groupName), http.StatusNotFound)
 
 			return
@@ -362,6 +424,11 @@ func (s *Server) handleRunSequence(w http.ResponseWriter, r *http.Request) {
 	for _, id := range rules {
 		def, ok := s.tests[id]
 		if !ok {
+			s.logger.Warn().
+				Str(logger.AttrTestID, id).
+				Str(logger.AttrPath, r.URL.Path).
+				Msg("test not found")
+
 			http.Error(w, fmt.Sprintf("test %q not found", id), http.StatusNotFound)
 
 			return

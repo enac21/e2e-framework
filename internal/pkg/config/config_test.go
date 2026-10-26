@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,6 +200,86 @@ func TestValidateTestGroups_UnknownTest(t *testing.T) {
 	}
 
 	if !strings.Contains(err.Error(), "unknown test") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadConfig_LoggingDefaults(t *testing.T) {
+	path := writeConfig(t, `
+store:
+  memory:
+    ttl: 10s
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if cfg.Logging.Level != "info" {
+		t.Errorf("expected default logging level %q, got %q", "info", cfg.Logging.Level)
+	}
+
+	if cfg.Logging.Format != "json" {
+		t.Errorf("expected default logging format %q, got %q", "json", cfg.Logging.Format)
+	}
+}
+
+func TestLoadConfig_LoggingParsed(t *testing.T) {
+	path := writeConfig(t, `
+logging:
+  level: debug
+  format: text
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("expected logging level debug, got %q", cfg.Logging.Level)
+	}
+
+	if cfg.Logging.Format != "text" {
+		t.Errorf("expected logging format text, got %q", cfg.Logging.Format)
+	}
+}
+
+func TestLoadConfig_LoggingInvalidLevel(t *testing.T) {
+	path := writeConfig(t, `
+logging:
+  level: verbose
+`)
+
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("expected error for invalid logging level")
+	}
+
+	if !errors.Is(err, domain.ErrConfiguration) {
+		t.Errorf("expected ErrConfiguration, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "logging.level") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadConfig_LoggingInvalidFormat(t *testing.T) {
+	path := writeConfig(t, `
+logging:
+  format: xml
+`)
+
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("expected error for invalid logging format")
+	}
+
+	if !errors.Is(err, domain.ErrConfiguration) {
+		t.Errorf("expected ErrConfiguration, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "logging.format") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

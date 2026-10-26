@@ -1178,6 +1178,10 @@ test_groups:
       - example_variables
     test_delay: 2s
     skip_fail_test: true
+
+logging:
+  level: info        # debug | info | warn | error   (default: info)
+  format: json       # json | text                   (default: json)
 ```
 
 ### Store backends
@@ -1219,6 +1223,125 @@ keep working unchanged.
 
 > **Note:** The `{{env.*}}` syntax works in both `configs/config.yaml` and
 > individual test YAML files in `tests/`. The same resolver handles both.
+
+### Logging
+
+The service logs structured events to **stdout/stderr** via the standard
+library `log/slog` (JSON by default, so containers/Kubernetes can parse them).
+
+```yaml
+logging:
+  level: info        # debug | info | warn | error   (default: info)
+  format: json       # json | text                   (default: json)
+```
+
+- **One configuration, one logger per package**: `main` calls
+  `logger.Configure(level, format)` once after loading the config, and each
+  package builds its own logger during construction with an explicit name
+  (`logger.New("<component>")`), which tags every event with `component`:
+  `main`, `api`, `cron`, `webhook`, `providers`, `notifier`, `trigger`,
+  `store`, `receiver` (+ `receiver_type`), `ingestor`, `orchestrator`. No
+  logger is passed around or stored in global variables.
+- **Chained API**: events are built with `Debug/Info/Warn/Error` (or
+  `Event(level)` for dynamic levels) and terminated by `Msg`:
+
+  ```go
+  lg.Info().
+      Str(logger.AttrRunID, runID).
+      Int(logger.AttrAttempt, attempt).
+      Duration(logger.AttrDurationMS, time.Since(start)).
+      Err(err).            // nil errors are skipped
+      Msg("Step attempt failed")
+  ```
+
+  Field helpers: `Str`, `Int`, `Bool`, `Duration` (stored in **ms**), `Any`
+  and `Err`. `lg.Fatal().…Msg("…")` logs at error level and exits with code 1.
+  A nil logger silently discards every event.
+- **Levels**: `debug` = diagnostics (route registration, per-message store
+  details, polling progress); `info` = normal life (run/step lifecycle, HTTP
+  requests, receiver connected); `warn` = handled degradation (retry attempt
+  `1..max-1`, skipped notifications, rejected messages); `error` = last retry
+  attempt (`attempt == max_attempts`), failed runs and dispatch failures.
+- **`source`**: every `RunTest` event carries `source` = `api` | `sequence` |
+  `cron`, so runs started from the API, from `/run-sequence` and from cron can
+  be filtered apart.
+
+#### Logs per execution flow
+
+The tables below enumerate the messages each flow emits, in order. Shared
+lines (step/trigger/receiver/run) appear in every flow with the same shape;
+only `source` differs. Levels are the ones emitted when the event is a
+success/failure; several messages switch level depending on the outcome.
+
+**API flow** — `POST /run` (and the rest of the HTTP API):
+
+| Message | Level | Component | What it says |
+|---|---|---|---|
+| `http route registered` | debug | api | one line per route at startup (`method`, `path`) |
+| `http request completed` | info | api | finished HTTP request: `method`, `path`, `resp_status`, `duration_ms` (`/health` → debug) |
+| `unauthorized request` | warn | api | request without a valid Bearer token (auth enabled) |
+| `test not found` | warn | api | `POST /run?id=…` with an unknown test id |
+| `test group not found` | warn | api | `test_group` query param that resolves to nothing |
+| `test run started` | info | orchestrator | run begins: `run_id`, `test_id`, `source=api`, `async` |
+| `reserved variable ignored` | warn | orchestrator | a `variables` key collides with `run_id`/`test_id`/`error` and is skipped |
+| `step started` | debug | orchestrator | step N begins (`trigger_type`) |
+| `waiting before step execution` | debug | orchestrator | sleeping `delay_ms` before the step |
+| `trigger request completed` | debug | trigger | trigger HTTP call done: `method`, `url` (query stripped), `resp_status`, `duration_ms` |
+| `trigger returned unexpected status` | warn | trigger | status differs from `expected_status` (or ≥ 400) |
+| `step attempt failed` | warn/error | orchestrator | trigger error: `warn` on attempts `< max_attempts`, `error` on the last one |
+| `receiver started` | debug | orchestrator | a receiver was created and started (`receiver_type`) |
+| `connected to mailbox` | info | receiver | IMAP connected (`host`, `mailbox`) |
+| `waiting for webhook message` | debug | receiver | webhook receiver polls the store |
+| `polling attempt completed` / `polling attempt failed` | debug | receiver | single API poll iteration result |
+| `webhook message received` | info | webhook | provider callback accepted (`provider`, `run_id`) |
+| `message stored` | debug | ingestor | webhook message deposited for the receiver |
+| `receiver finished` | debug/warn | orchestrator | collection + assertions done: `status`, `duration_ms` (warn on failure) |
+| `step completed` | debug | orchestrator | step succeeded (`duration_ms`) |
+| `test run finished` | info/warn/error | orchestrator | run result: `status`, `attempts`, `duration_ms` (error on failed/error, warn on skipped) |
+| `failure notification sent` / `skipped` / `failed` | info/warn/error | notifier | `on_failure` call outcome (`call_index`, `resp_status` / `reason` / `error`) |
+| `failure notification dispatch failed` | error | orchestrator | the notifier returned an error |
+
+**Sequential flow** — `POST /run-sequence` (config test groups) `source=sequence`:
+
+| Message | Level | Component | What it says |
+|---|---|---|---|
+| `http route registered` | debug | api | startup route registration (same as API flow) |
+| `http request completed` | info | api | the `/run-sequence` request itself |
+| `test sequence started` | info | orchestrator | sequence begins: `tests_count`, `skip_fail_test`, `source=sequence` |
+| *(then the exact run lines of the API flow, `source=sequence`, per test)* | | | `test run started`…`test run finished` repeated for each test in order |
+| `test sequence finished` | info | orchestrator | sequence ends: `tests_count`, `failed_count`, `duration_ms` |
+
+**Cron flow** — scheduled tests `source=cron`:
+
+| Message | Level | Component | What it says |
+|---|---|---|---|
+| `test scheduling skipped` | debug | cron | test is disabled or has no schedule (`is_enabled`, `schedule`, `reason`) |
+| `test scheduled` | info | cron | test registered with its cron `schedule` |
+| `scheduler started` / `scheduler stopped` | info | cron | lifecycle emitted by `main` around the scheduler |
+| `http route registered` | debug | api | startup route registration (shared) |
+| `cron triggered test run` | info | cron | the schedule fired (`test_id`, `schedule`) |
+| *(then the exact run lines of the API flow, `source=cron`)* | | | `test run started`…`test run finished` for the triggered run |
+| `scheduled test run finished` | info/warn/error | cron | cron-level summary: `run_id`, `status`, `schedule`, `duration_ms` (error on failure, warn on skipped) |
+
+Common attributes:
+
+| Attribute | Where | Meaning |
+|-----------|-------|---------|
+| `run_id` | all run events | Correlation id for a whole run |
+| `test_id`, `source` | run events | Test definition and where the run started |
+| `step`, `attempt`, `max_attempts` | step events | Step name and retry position |
+| `duration_ms` | run/step/request events | Elapsed time |
+| `resp_status`, `status` | request/run events | HTTP status / run status |
+| `error` | failure events | Go error text (never bodies, headers or variables) |
+
+Example filter with `jq`:
+
+```bash
+e2e-server 2>/dev/null | jq 'select(.run_id == "…")'
+```
+
+Set `logging.level: debug` in local development to see full diagnostics;
+keep `info` (or `warn`) in production.
 
 ---
 
@@ -1266,8 +1389,12 @@ Standardise all error responses to return `Content-Type: application/json` with 
 ```
 Currently `http.Error` returns `text/plain`, which is inconsistent with the JSON success responses.
 
-### 12. Production-Ready Console Logging System
-Implement a reworked, structured logging system (e.g., using `log/slog`) that outputs strictly to standard console (stdout/stderr). This ensures logs are properly captured, parseable, and fully functional when the project is deployed in production environments like containers, Kubernetes, or any other cloud-native orchestrator.
+### ✅ 12. Production-Ready Console Logging System
+Structured logging with `log/slog` outputting to stdout/stderr (JSON or text),
+levelled via `logging.level`/`logging.format`, injected by constructor into
+every component. Run/step/request events carry correlated attributes
+(`run_id`, `test_id`, `source`, `attempt`, `duration_ms`, …) with a defined
+severity policy. See [Logging](#logging).
 
 ### 13. Comprehensive Documentation & YAML Reference
 Review and enhance the `README.md` documentation. The primary goal is to thoroughly document each feature and rule of the framework strictly from the perspective of the YAML configuration file, providing clear examples and use cases for end-users to understand how to leverage all capabilities.

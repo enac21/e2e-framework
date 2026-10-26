@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"e2e-framework/internal/pkg/config"
+	"e2e-framework/internal/pkg/logger"
 )
 
 const (
@@ -63,8 +64,9 @@ ON CONFLICT (channel, recipient) DO NOTHING
 )
 
 type PostgresStore struct {
-	pool *pgxpool.Pool
-	ttl  time.Duration
+	pool   *pgxpool.Pool
+	ttl    time.Duration
+	logger *logger.Logger
 }
 
 func NewPostgresStore(cfg config.PostgresStoreConfig) (*PostgresStore, error) {
@@ -77,7 +79,11 @@ func NewPostgresStore(cfg config.PostgresStoreConfig) (*PostgresStore, error) {
 		return nil, fmt.Errorf("%w: failed to connect to postgres store: %v", domain.ErrInternal, err)
 	}
 
-	s := &PostgresStore{pool: pool, ttl: cfg.TTL}
+	s := &PostgresStore{
+		pool:   pool,
+		ttl:    cfg.TTL,
+		logger: logger.New("store").With(logger.AttrStoreType, "postgres"),
+	}
 
 	if err := s.init(context.Background()); err != nil {
 		pool.Close()
@@ -97,13 +103,22 @@ func (s *PostgresStore) init(ctx context.Context) error {
 }
 
 func (s *PostgresStore) purgeExpired(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, purgeMessagesSQL); err != nil {
+	messagesTag, err := s.pool.Exec(ctx, purgeMessagesSQL)
+	if err != nil {
 		return err
 	}
 
-	_, err := s.pool.Exec(ctx, purgeReservationsSQL)
+	reservationsTag, err := s.pool.Exec(ctx, purgeReservationsSQL)
+	if err != nil {
+		return err
+	}
 
-	return err
+	deleted := messagesTag.RowsAffected() + reservationsTag.RowsAffected()
+	if deleted > 0 && s.logger != nil {
+		s.logger.Debug().Int("deleted_count", int(deleted)).Msg("expired results purged")
+	}
+
+	return nil
 }
 
 func (s *PostgresStore) Deposit(ctx context.Context, msg *domain.Message) error {

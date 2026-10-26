@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/pkg/assertion"
+	"e2e-framework/internal/pkg/logger"
 	"e2e-framework/internal/pkg/template"
 )
 
@@ -33,6 +34,7 @@ type Orchestrator struct {
 	receivers  *receiver.ReceiverRegistry
 	assertions *assertion.Registry
 	notifier   ports.Notifier
+	logger     *logger.Logger
 }
 
 func NewOrchestrator(
@@ -48,6 +50,7 @@ func NewOrchestrator(
 		receivers:  receivers,
 		assertions: assertions,
 		notifier:   notifier,
+		logger:     logger.New("orchestrator"),
 	}
 }
 
@@ -61,37 +64,55 @@ func (o *Orchestrator) RunSequence(
 	defs []domain.TestDefinition,
 	cfg SequenceConfig,
 ) []*domain.TestResult {
+	seqStart := time.Now()
+
+	o.logger.Info().
+		Str(logger.AttrSource, logger.SequenceFlow).
+		Int(logger.AttrTestsCount, len(defs)).
+		Bool("skip_fail_test", cfg.SkipFailTest).
+		Msg("Test sequence started")
+
 	results := make([]*domain.TestResult, 0, len(defs))
+	failedCount := 0
 
 	for i, def := range defs {
 		if i > 0 && cfg.Delay > 0 {
 			time.Sleep(cfg.Delay)
 		}
 
-		_, resultCh := o.RunTest(ctx, def)
+		_, resultCh := o.RunTest(ctx, def, logger.SequenceFlow)
 		result := <-resultCh
 		results = append(results, result)
 
 		if cfg.SkipFailTest && (result.Status == domain.StatusFailed || result.Status == domain.StatusError) {
+			failedCount++
+
 			break
 		}
 	}
 
+	o.logger.Info().
+		Str(logger.AttrSource, logger.SequenceFlow).
+		Int(logger.AttrTestsCount, len(results)).
+		Int(logger.AttrFailedCount, failedCount).
+		Duration(logger.AttrDurationMS, time.Since(seqStart)).
+		Msg("Test sequence finished")
+
 	return results
 }
 
-func (o *Orchestrator) RunTest(ctx context.Context, def domain.TestDefinition) (string, <-chan *domain.TestResult) {
+func (o *Orchestrator) RunTest(ctx context.Context, def domain.TestDefinition, source string) (string, <-chan *domain.TestResult) {
 	runID := fmt.Sprintf("%s-%d", def.ID, time.Now().UnixNano())
 	resultCh := make(chan *domain.TestResult, 1)
 
 	go func() {
-		resultCh <- o.execute(ctx, def, runID)
+		resultCh <- o.execute(ctx, def, runID, source)
 	}()
 
 	return runID, resultCh
 }
 
-func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, runID string) *domain.TestResult {
+func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, runID string, source string) *domain.TestResult {
 	startTime := time.Now()
 
 	result := &domain.TestResult{
@@ -106,6 +127,8 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 		result.FinishedAt = time.Now()
 		result.DurationMs = result.FinishedAt.Sub(startTime).Milliseconds()
 
+		o.logRunFinished(result, source)
+
 		return result
 	}
 
@@ -118,7 +141,36 @@ func (o *Orchestrator) execute(ctx context.Context, def domain.TestDefinition, r
 		go o.notifyFailure(context.Background(), def.OnFailure, result)
 	}
 
+	o.logRunFinished(result, source)
+
 	return result
+}
+
+func (o *Orchestrator) logRunFinished(result *domain.TestResult, source string) {
+	e := o.logger.Event(runStatusLevel(result.Status)).
+		Str(logger.AttrRunID, result.RunID).
+		Str(logger.AttrTestID, result.TestID).
+		Str(logger.AttrSource, source).
+		Str(logger.AttrStatus, string(result.Status)).
+		Int(logger.AttrDurationMS, int(result.DurationMs)).
+		Int("attempts", result.Attempts)
+
+	if result.Error != "" {
+		e.Str(logger.AttrError, result.Error)
+	}
+
+	e.Msg("Test run finished")
+}
+
+func runStatusLevel(status domain.RunStatus) slog.Level {
+	switch status {
+	case domain.StatusFailed, domain.StatusError:
+		return slog.LevelError
+	case domain.StatusSkipped:
+		return slog.LevelWarn
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func (o *Orchestrator) executeSequential(
@@ -132,7 +184,11 @@ func (o *Orchestrator) executeSequential(
 
 	for k, v := range def.Variables {
 		if reservedVarNames[k] {
-			log.Printf("[%s] reserved variable name %q ignored in variables block", runID, k)
+			o.logger.Warn().
+				Str(logger.AttrRunID, runID).
+				Str(logger.AttrTestID, def.ID).
+				Str(logger.AttrName, k).
+				Msg("Reserved variable ignored")
 
 			continue
 		}
@@ -141,8 +197,23 @@ func (o *Orchestrator) executeSequential(
 	}
 
 	for i, triggerStep := range def.Triggers {
+		step := i + 1
+
+		o.logger.Debug().
+			Str(logger.AttrRunID, runID).
+			Str(logger.AttrTestID, def.ID).
+			Int(logger.AttrStep, step).
+			Str(logger.AttrTriggerType, triggerStep.EffectiveType()).
+			Msg("Step started")
+
 		if triggerStep.DelayBefore > 0 {
-			log.Printf("[%s] step %d waiting %s before execution", runID, i+1, triggerStep.DelayBefore)
+			o.logger.Debug().
+				Str(logger.AttrRunID, runID).
+				Str(logger.AttrTestID, def.ID).
+				Int(logger.AttrStep, step).
+				Duration(logger.AttrDelayMS, triggerStep.DelayBefore).
+				Msg("Waiting before step execution")
+
 			time.Sleep(triggerStep.DelayBefore)
 		}
 
@@ -173,17 +244,28 @@ func (o *Orchestrator) executeSequential(
 
 		var lastTriggerErr error
 
+		stepStart := time.Now()
+
 		for attempt := 1; attempt <= stepMaxAttempts; attempt++ {
 			result.Attempts++
-
-			if attempt > 1 {
-				log.Printf("[%s] step %d retrying (attempt %d/%d)", runID, i+1, attempt, stepMaxAttempts)
-			}
 
 			stepVars, triggerErr := stepTrigger.Execute(ctx, triggerStep, runID, triggerVars)
 			if triggerErr != nil {
 				lastTriggerErr = triggerErr
-				log.Printf("[%s] step %d attempt %d/%d failed: %v", runID, i+1, attempt, stepMaxAttempts, triggerErr)
+
+				logEvent := o.logger.Warn
+				if attempt == stepMaxAttempts {
+					logEvent = o.logger.Error
+				}
+
+				logEvent().
+					Str(logger.AttrRunID, runID).
+					Str(logger.AttrTestID, def.ID).
+					Int(logger.AttrStep, step).
+					Int(logger.AttrAttempt, attempt).
+					Int(logger.AttrMaxAttempts, stepMaxAttempts).
+					Err(triggerErr).
+					Msg("Step attempt failed")
 
 				if attempt < stepMaxAttempts {
 					time.Sleep(def.Retry.Delay)
@@ -237,6 +319,13 @@ func (o *Orchestrator) executeSequential(
 			return
 		}
 
+		o.logger.Debug().
+			Str(logger.AttrRunID, runID).
+			Str(logger.AttrTestID, def.ID).
+			Int(logger.AttrStep, step).
+			Duration(logger.AttrDurationMS, time.Since(stepStart)).
+			Msg("Step completed")
+
 		result.Status = domain.StatusPassed
 	}
 
@@ -273,12 +362,29 @@ func (o *Orchestrator) startReceivers(ctx context.Context, configs []domain.Rece
 	for _, rcfg := range configs {
 		instance, err := o.receivers.Create(rcfg)
 		if err != nil {
+			o.logger.Warn().
+				Str(logger.AttrRunID, runID).
+				Str(logger.AttrReceiver, rcfg.Type).
+				Err(err).
+				Msg("Failed to start receiver")
+
 			return active, fmt.Errorf("failed to create receiver %s: %w", rcfg.Type, err)
 		}
 
 		if err := instance.Start(ctx, runID, triggerVars); err != nil {
+			o.logger.Warn().
+				Str(logger.AttrRunID, runID).
+				Str(logger.AttrReceiver, rcfg.Type).
+				Err(err).
+				Msg("Failed to start receiver")
+
 			return active, fmt.Errorf("failed to start receiver %s: %w", rcfg.Type, err)
 		}
+
+		o.logger.Debug().
+			Str(logger.AttrRunID, runID).
+			Str(logger.AttrReceiver, rcfg.Type).
+			Msg("Receiver started")
 
 		active = append(active, activeReceiver{cfg: rcfg, instance: instance})
 	}
@@ -306,6 +412,25 @@ func (o *Orchestrator) collectAndAssertAll(ctx context.Context, runID string, ac
 			rcvResult := o.collectAndAssert(ctx, runID, rcfg, instance, triggerVars)
 			rcvResult.DurationMs = time.Since(rcvStart).Milliseconds()
 			rcvResult.TriggerIndex = triggerIndex
+
+			rcvLevel := slog.LevelDebug
+			if rcvResult.Status == domain.StatusFailed || rcvResult.Status == domain.StatusError {
+				rcvLevel = slog.LevelWarn
+			}
+
+			logEvent := o.logger.Event(rcvLevel).
+				Str(logger.AttrRunID, runID).
+				Str(logger.AttrTestID, result.TestID).
+				Int(logger.AttrStep, triggerIndex+1).
+				Str(logger.AttrReceiver, rcvResult.Type).
+				Str(logger.AttrStatus, string(rcvResult.Status)).
+				Int(logger.AttrDurationMS, int(rcvResult.DurationMs))
+
+			if rcvResult.Error != "" {
+				logEvent.Str(logger.AttrError, rcvResult.Error)
+			}
+
+			logEvent.Msg("Receiver finished")
 
 			mu.Lock()
 
@@ -402,6 +527,10 @@ func (o *Orchestrator) failResult(result *domain.TestResult, errStr string) {
 
 func (o *Orchestrator) notifyFailure(ctx context.Context, cfg domain.OnFailureConfig, result *domain.TestResult) {
 	if err := o.notifier.Notify(ctx, cfg, result); err != nil {
-		log.Printf("[%s] on_failure notification failed: %v", result.RunID, err)
+		o.logger.Error().
+			Str(logger.AttrRunID, result.RunID).
+			Str(logger.AttrTestID, result.TestID).
+			Err(err).
+			Msg("Failure notification dispatch failed")
 	}
 }

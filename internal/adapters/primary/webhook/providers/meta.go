@@ -1,18 +1,22 @@
 package providers
 
 import (
-	"log"
 	"net/http"
 	"time"
 
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
+	"e2e-framework/internal/pkg/logger"
 )
 
-type MetaExtractor struct{}
+type MetaExtractor struct {
+	logger *logger.Logger
+}
 
 func NewMetaExtractor() *MetaExtractor {
-	return &MetaExtractor{}
+	return &MetaExtractor{
+		logger: logger.New("providers").With(logger.AttrProvider, "meta"),
+	}
 }
 
 func (e *MetaExtractor) Extract(req *http.Request) (*domain.Message, error) {
@@ -21,7 +25,7 @@ func (e *MetaExtractor) Extract(req *http.Request) (*domain.Message, error) {
 		return nil, err
 	}
 
-	log.Printf("[Meta Webhook] Extracted fields: %v", fields)
+	e.logger.Debug().Int("field_count", len(fields)).Msg("webhook fields extracted")
 
 	runID := fields["messages.0.text.body"]
 	if runID == "" {

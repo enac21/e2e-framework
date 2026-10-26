@@ -44,6 +44,11 @@ type StoreConfig struct {
 	Memory   MemoryStoreConfig   `yaml:"memory"`
 }
 
+type LoggingConfig struct {
+	Level  string `yaml:"level"`
+	Format string `yaml:"format"`
+}
+
 type Config struct {
 	Server struct {
 		Port int `yaml:"port"`
@@ -53,6 +58,7 @@ type Config struct {
 		JWTSecret string `yaml:"jwt_secret"`
 	} `yaml:"auth"`
 	Store      StoreConfig                `yaml:"store"`
+	Logging    LoggingConfig              `yaml:"logging"`
 	TestGroups map[string]TestGroupConfig `yaml:"test_groups"`
 	Tests      struct {
 		Path string `yaml:"path"`
@@ -101,7 +107,35 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Store.Memory.TTL = 300 * time.Second
 	}
 
+	if cfg.Logging.Level == "" {
+		cfg.Logging.Level = "info"
+	}
+
+	if cfg.Logging.Format == "" {
+		cfg.Logging.Format = "json"
+	}
+
+	if err := validateLogging(cfg.Logging); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+func validateLogging(l LoggingConfig) error {
+	switch l.Level {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("%w: unknown logging.level %q (supported: debug, info, warn, error)", domain.ErrConfiguration, l.Level)
+	}
+
+	switch l.Format {
+	case "json", "text":
+	default:
+		return fmt.Errorf("%w: unknown logging.format %q (supported: json, text)", domain.ErrConfiguration, l.Format)
+	}
+
+	return nil
 }
 
 func ValidateTestGroups(groups map[string]TestGroupConfig, tests map[string]domain.TestDefinition) error {

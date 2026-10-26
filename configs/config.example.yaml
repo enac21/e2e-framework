@@ -28,6 +28,10 @@ store:
 tests:
   path: "tests"
 
+logging:
+  level: info       # debug | info | warn | error
+  format: json      # json (production) | text (local)
+
 test_groups:
   ci:
     description: "Pipeline that runs after every merge"

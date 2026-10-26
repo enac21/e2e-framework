@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
 	"e2e-framework/internal/core/domain"
+	"e2e-framework/internal/pkg/logger"
 	"e2e-framework/internal/pkg/template"
 )
 
@@ -19,11 +19,13 @@ const defaultCallTimeout = 15 * time.Second
 
 type HTTPNotifier struct {
 	client *http.Client
+	logger *logger.Logger
 }
 
 func NewHTTPNotifier() *HTTPNotifier {
 	return &HTTPNotifier{
 		client: &http.Client{},
+		logger: logger.New("notifier"),
 	}
 }
 
@@ -48,7 +50,14 @@ func (n *HTTPNotifier) Notify(ctx context.Context, cfg domain.OnFailureConfig, r
 
 	var errs []error
 	for i, call := range cfg.Calls {
-		if err := n.executeCall(ctx, call, vars, result.RunID, i); err != nil {
+		if err := n.executeCall(ctx, call, vars, result, i); err != nil {
+			n.logger.Error().
+				Str(logger.AttrRunID, result.RunID).
+				Str(logger.AttrTestID, result.TestID).
+				Int(logger.AttrCallIndex, i+1).
+				Err(err).
+				Msg("failure notification failed")
+
 			errs = append(errs, err)
 		}
 	}
@@ -56,10 +65,12 @@ func (n *HTTPNotifier) Notify(ctx context.Context, cfg domain.OnFailureConfig, r
 	return errors.Join(errs...)
 }
 
-func (n *HTTPNotifier) executeCall(ctx context.Context, call domain.CallAction, vars map[string]string, runID string, index int) error {
+func (n *HTTPNotifier) executeCall(ctx context.Context, call domain.CallAction, vars map[string]string, result *domain.TestResult, index int) error {
 	if call.DelayBefore > 0 {
 		time.Sleep(call.DelayBefore)
 	}
+
+	callStart := time.Now()
 
 	method := call.Method
 	if method == "" {
@@ -82,7 +93,12 @@ func (n *HTTPNotifier) executeCall(ctx context.Context, call domain.CallAction, 
 	}
 
 	if reason := unresolvedReason(resolvedURL, resolvedHeaders, bodyBytes); reason != "" {
-		log.Printf("[%s] on_failure call %d skipped: %s", runID, index+1, reason)
+		n.logger.Warn().
+			Str(logger.AttrRunID, result.RunID).
+			Str(logger.AttrTestID, result.TestID).
+			Int(logger.AttrCallIndex, index+1).
+			Str(logger.AttrReason, reason).
+			Msg("failure notification skipped")
 
 		return nil
 	}
@@ -128,6 +144,14 @@ func (n *HTTPNotifier) executeCall(ctx context.Context, call domain.CallAction, 
 
 		return fmt.Errorf("%w: on_failure call returned status %d: %s", domain.ErrInternal, resp.StatusCode, string(body))
 	}
+
+	n.logger.Info().
+		Str(logger.AttrRunID, result.RunID).
+		Str(logger.AttrTestID, result.TestID).
+		Int(logger.AttrCallIndex, index+1).
+		Int(logger.AttrRespStatus, resp.StatusCode).
+		Duration(logger.AttrDurationMS, time.Since(callStart)).
+		Msg("failure notification sent")
 
 	return nil
 }

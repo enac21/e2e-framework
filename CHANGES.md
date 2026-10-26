@@ -5,6 +5,36 @@ The format follows a chronological order, newest changes first.
 
 ---
 
+## [2026-10-06] — Structured logging with `log/slog` (plan `docs/plan_logging.md`)
+
+- **New package `internal/pkg/logger`**: `logger.Configure(level, format)` sets the process-wide configuration (`json`/`text`, `debug|info|warn|error`) once from `main`, `logger.New(component)` builds the logger of each package (tagging `component` at initialization), `logger.NewWithHandler(h)` for tests, constants for attribute keys (`run_id`, `test_id`, `source`, `step`, `attempt`, `max_attempts`, `duration_ms`, `resp_status`, `status`, `error`, …) and run sources (`SourceAPI`, `SourceSequence`, `SourceCron`). Unit tests included.
+- **Chained (fluent) log API** — the only way to log in the codebase:
+
+  ```go
+  lg.Info().Str(logger.AttrRunID, runID).Int(logger.AttrAttempt, n).Err(err).Msg("Step attempt failed")
+  ```
+
+  - Starters: `Debug()`, `Info()`, `Warn()`, `Error()`, `Fatal()` (logs at error level then `os.Exit(1)`) and `Event(level)` for dynamic levels; all return an `*Event` on which fields accumulate.
+  - Fields: `Str`, `Int`, `Bool`, `Duration` (emitted in **milliseconds**), `Any`, `Err` (key `error`, skipped when nil) → terminated by `Msg(msg)`.
+  - `Logger` is now a struct wrapping `*slog.Logger` (was a type alias), with `With`, `Enabled`, and nil-safety: a nil logger or nil event discards everything, so call sites never nil-check.
+  - The previous `lg.Info("msg", k, v…)` variadic style and the `logger.Fatal(l, msg, args…)` helper were removed; **every call site** was migrated (main, API/webhook servers, orchestrator, ingestor, cron scheduler, receivers, trigger, notifier, store).
+- **Config** (`internal/pkg/config/config.go`): new `logging` block (`level` default `info`, `format` default `json`) validated by `validateLogging` → `domain.ErrConfiguration` on unknown values; defaults applied in `config.go`, documented in `configs/config.example.yaml`.
+- **Bootstrap** (`cmd/server/main.go`): `logger.New("main")` before the config load, then a single `logger.Configure(cfg.Logging.Level, cfg.Logging.Format)` and a rebuilt `lg = logger.New("main")`; all 8 `log.Fatalf` → `lg.Fatal().…Msg(…)`; startup/shutdown events logged.
+- **Initialization per package (no wiring, no globals)**: every component creates its own logger with an explicit name — `api.NewServer`, `webhook.NewServer`, `cron.NewScheduler`, `services.NewOrchestrator`, `services.NewIngestor`, `notifier.NewHTTPNotifier`, `trigger.NewHTTPTrigger`, `receiver.NewIMAPReceiver/NewAPIPollingReceiver/NewWebhookReceiver`, `store.NewPostgresStore`, and the webhook providers — so no constructor takes a logger parameter and `main` no longer passes one around (call sites and tests updated). Components: `main`, `api`, `cron`, `webhook`, `providers`, `notifier`, `trigger`, `store`, `receiver` (+ `receiver_type`), `ingestor`, `orchestrator`.
+- **Orchestrator events**: run started/finished (level derived from status: passed→info, skipped→warn, failed/error→error), step started/completed, retry attempts (`warn` for `attempt < max_attempts`, **`error` on the last attempt**), sequence started/finished, receiver started/failed/finished, failure-notification dispatch failures. `RunTest(ctx, def, source)` tags every run with `source` = `api` | `sequence` | `cron`.
+- **API request middleware**: `statusRecorder` + `loggingMiddleware` on `http.Server.Handler` — one structured `HTTP request` line per request (`method`, `path`, `resp_status`, `duration_ms`, `remote`), `/health` at `debug` to avoid noise; per-route debug registration collapsed into a single `HTTP routes registered`.
+- **Cron**: trigger time and run outcome are now logged (`Cron triggered test run`, `Scheduled test run finished` at info/warn/error by status), plus capitalised lifecycle messages.
+- **Receivers**: `Connected to mailbox` / `Timed out waiting for email` / `Disconnected from mailbox` (IMAP, with `Host`/`Mailbox` context), `Polling attempt completed/failed` (api, debug), `Waiting for webhook message` / `Webhook message received` with `waited_ms` (webhook).
+- **Webhook server & providers**: `Webhook message received`, `Webhook fields extracted` (`field_count`, debug) — **all logging of field values removed** (PII); `Message stored`/`Message rejected` in the ingestor with only metadata.
+- **Trigger/notifier**: `Trigger request completed` (debug), `Trigger returned unexpected status` (warn), URLs sanitised (query string stripped), `Failure notification sent/skipped/failed`.
+- **Store**: `Expired results purged` (debug) now computes `deleted_count` via `RowsAffected`.
+- **Non-goals (plan §3.11)**: no bodies, headers, token values, test variables or query strings are ever logged; `error` text carries failure detail.
+- **Docs**: README "Logging" section (config reference, attribute table, level policy, `jq` filter example), README config reference gains the `logging:` block, roadmap item 12 marked done.
+- **Feedback round**: the API logs one line per registered route (`http route registered`, with `method`/`path`) instead of one fixed line with a hardcoded list; all log `msg` values are lowercase; each package initializes its own logger directly on the `logger:` struct-field line (`logger: logger.New("<component>")`), never through an intermediate variable in the constructor; README now documents a **per-flow log table** (`api`, `sequence`, `cron`) enumerating every message, its level and what it reports.
+- **Verification**: `go build ./...`, `go vet ./...` (only a pre-existing `imap/client.go` vet issue remains), `go test ./...` all pass; `golangci-lint` reports only pre-existing repo-wide `gofmt`/CRLF findings, no new issues.
+
+---
+
 ## [2026-09-13] — Receiver rename: `request` → `webhook`
 
 - **Breaking change**: the `request` receiver is renamed to `webhook` (package `internal/adapters/secondary/receiver/webhook`, type `domain.WebhookReceiverType = "webhook"`, constructor `NewWebhookReceiver`). The name now describes what it does: it polls the store for messages that the webhook server (`POST /webhook/{provider}`) deposited. Update existing test YAMLs: `receiver.type: request` → `receiver.type: webhook`.

@@ -1,19 +1,23 @@
 package providers
 
 import (
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
+	"e2e-framework/internal/pkg/logger"
 )
 
-type TwilioExtractor struct{}
+type TwilioExtractor struct {
+	logger *logger.Logger
+}
 
 func NewTwilioExtractor() *TwilioExtractor {
-	return &TwilioExtractor{}
+	return &TwilioExtractor{
+		logger: logger.New("providers").With(logger.AttrProvider, "twilio"),
+	}
 }
 
 func (e *TwilioExtractor) Extract(req *http.Request) (*domain.Message, error) {
@@ -22,7 +26,7 @@ func (e *TwilioExtractor) Extract(req *http.Request) (*domain.Message, error) {
 		return nil, err
 	}
 
-	log.Printf("[Twilio Webhook] Extracted fields: %v", fields)
+	e.logger.Debug().Int("field_count", len(fields)).Msg("webhook fields extracted")
 
 	runID := strings.TrimSpace(fields["body"])
 
