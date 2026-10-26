@@ -9,17 +9,20 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
 	"e2e-framework/internal/pkg/assertion"
 	"e2e-framework/internal/pkg/httputil"
+	"e2e-framework/internal/pkg/logger"
 	"e2e-framework/internal/pkg/template"
 )
 
 type HTTPTrigger struct {
 	client     ports.HttpClient
 	assertions *assertion.Registry
+	logger     *logger.Logger
 }
 
 func NewHTTPTrigger(registry *assertion.Registry, client ports.HttpClient) (*HTTPTrigger, error) {
@@ -33,6 +36,7 @@ func NewHTTPTrigger(registry *assertion.Registry, client ports.HttpClient) (*HTT
 	return &HTTPTrigger{
 		client:     client,
 		assertions: registry,
+		logger:     logger.New("trigger"),
 	}, nil
 }
 
@@ -103,18 +107,41 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 		req.Header.Set(k, v)
 	}
 
+	reqStart := time.Now()
+
 	resp, err := t.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: HTTP request failed: %v", domain.ErrTriggerFailed, err)
 	}
 	defer resp.Body.Close()
 
+	t.logger.Debug().
+		Str(logger.AttrRunID, runID).
+		Str(logger.AttrMethod, method).
+		Str(logger.AttrURL, sanitizeURL(targetURL)).
+		Int(logger.AttrRespStatus, resp.StatusCode).
+		Duration(logger.AttrDurationMS, time.Since(reqStart)).
+		Msg("trigger request completed")
+
 	if def.ExpectedStatus != 0 {
 		if resp.StatusCode != def.ExpectedStatus {
+			t.logger.Warn().
+				Str(logger.AttrRunID, runID).
+				Str(logger.AttrURL, sanitizeURL(targetURL)).
+				Int(logger.AttrRespStatus, resp.StatusCode).
+				Int(logger.AttrExpected, def.ExpectedStatus).
+				Msg("trigger returned unexpected status")
+
 			body, _ := io.ReadAll(resp.Body)
 			return nil, fmt.Errorf("%w: expected status %d, got %d: %s", domain.ErrTriggerFailed, def.ExpectedStatus, resp.StatusCode, string(body))
 		}
 	} else if resp.StatusCode >= 400 {
+		t.logger.Warn().
+			Str(logger.AttrRunID, runID).
+			Str(logger.AttrURL, sanitizeURL(targetURL)).
+			Int(logger.AttrRespStatus, resp.StatusCode).
+			Msg("trigger returned unexpected status")
+
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("%w: returned status %d: %s", domain.ErrTriggerFailed, resp.StatusCode, string(body))
 	}
@@ -161,6 +188,16 @@ func (t *HTTPTrigger) Execute(ctx context.Context, def domain.TriggerConfig, run
 	}
 
 	return extracted, nil
+}
+
+// sanitizeURL drops the query string so tokens or personal data never reach
+// the logs.
+func sanitizeURL(raw string) string {
+	if i := strings.IndexByte(raw, '?'); i >= 0 {
+		return raw[:i]
+	}
+
+	return raw
 }
 
 func unresolvedTriggerReason(targetURL string, headers map[string]string, body string) string {

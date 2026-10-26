@@ -4,25 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/core/ports"
+	"e2e-framework/internal/pkg/logger"
 )
 
 type Server struct {
 	ingestor   ports.MessageIngestor
 	extractors map[string]ports.Extractor
+	logger     *logger.Logger
 }
 
 func NewServer(ingestor ports.MessageIngestor) (*Server, error) {
 	if ingestor == nil {
 		return nil, fmt.Errorf("%w: message ingestor is required", domain.ErrConfiguration)
 	}
+
 	return &Server{
 		ingestor:   ingestor,
 		extractors: make(map[string]ports.Extractor),
+		logger:     logger.New("webhook"),
 	}, nil
 }
 
@@ -31,7 +34,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (s *Server) RegisterExtractor(path string, ext ports.Extractor) {
-	log.Printf("[Webhook API] Registered endpoint: POST /webhook/%s", path)
+	s.logger.Debug().
+		Str(logger.AttrProvider, path).
+		Msg("webhook route registered")
+
 	s.extractors[path] = ext
 }
 
@@ -59,6 +65,11 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	extractor, exists := s.extractors[provider]
 	if !exists {
+		s.logger.Warn().
+			Str(logger.AttrProvider, provider).
+			Str(logger.AttrPath, r.URL.Path).
+			Msg("unknown webhook provider")
+
 		http.Error(w, "unknown provider", http.StatusNotFound)
 
 		return
@@ -66,6 +77,11 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	msg, err = extractor.Extract(r)
 	if err != nil {
+		s.logger.Warn().
+			Str(logger.AttrProvider, provider).
+			Err(err).
+			Msg("failed to extract webhook payload")
+
 		if errors.Is(err, domain.ErrValidation) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		} else {
@@ -83,6 +99,11 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	s.logger.Info().
+		Str(logger.AttrProvider, provider).
+		Str(logger.AttrRunID, msg.RunID).
+		Msg("webhook message received")
 
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -9,12 +9,17 @@ import (
 
 	"e2e-framework/internal/core/domain"
 	"e2e-framework/internal/pkg/httputil"
+	"e2e-framework/internal/pkg/logger"
 )
 
-type GenericExtractor struct{}
+type GenericExtractor struct {
+	logger *logger.Logger
+}
 
 func NewGenericExtractor() *GenericExtractor {
-	return &GenericExtractor{}
+	return &GenericExtractor{
+		logger: logger.New("providers").With(logger.AttrProvider, "generic"),
+	}
 }
 
 func (e *GenericExtractor) Extract(req *http.Request) (*domain.Message, error) {
@@ -59,6 +64,8 @@ func (e *GenericExtractor) Extract(req *http.Request) (*domain.Message, error) {
 	}
 
 	fields["method"] = req.Method
+
+	e.logger.Debug().Int("field_count", len(fields)).Msg("webhook fields extracted")
 
 	runID := req.URL.Query().Get("run_id")
 	if runID == "" {
