@@ -1,12 +1,20 @@
 name: Docker Publish
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to publish (e.g. 0.1.0 or v0.1.0)'
+        required: true
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Normaliza la versión para que siempre empiece con 'v' (checkout del tag)
+  VERSION: ${{ github.event.inputs.version && (startsWith(github.event.inputs.version, 'v') && github.event.inputs.version || 'v' + github.event.inputs.version) || github.ref_name }}
 
 jobs:
   build-and-push:
@@ -17,6 +25,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
 
       - name: Set up QEMU (ARM64 emulation)
         uses: docker/setup-qemu-action@v3
