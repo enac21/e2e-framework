@@ -1,16 +1,22 @@
 name: Release version PR
 
 on:
-  push:
-    branches: [main]
+  pull_request_target:
+    types: [closed]
 
 jobs:
   release-version-pr:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
       - uses: googleapis/release-please-action@v4
         with:
           release-type: go

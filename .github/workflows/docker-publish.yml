@@ -34,7 +34,7 @@ jobs:
           else
             RAW="${GITHUB_REF#refs/tags/}"
           fi
-          # Quitar 'v' inicial si la tiene, para calcular major.minor
+
           VER="${RAW#v}"
           MAJOR_MINOR="${VER%.*}"
           echo "full=$RAW" >> $GITHUB_OUTPUT
