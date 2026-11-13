@@ -35,10 +35,18 @@ jobs:
             RAW="${GITHUB_REF#refs/tags/}"
           fi
 
-          VER="${RAW#v}"
-          MAJOR_MINOR="${VER%.*}"
-          echo "full=$RAW" >> $GITHUB_OUTPUT
-          echo "major_minor=$MAJOR_MINOR" >> $GITHUB_OUTPUT
+          # Normalizar: quitar 'v' inicial si la tiene, para trabajar limpio
+          VER_NO_V="${RAW#v}"
+          MAJOR_MINOR_NO_V="${VER_NO_V%.*}"
+
+          # Siempre publicar con 'v' adelante
+          FULL_V="v${VER_NO_V}"
+          MAJOR_MINOR_V="v${MAJOR_MINOR_NO_V}"
+
+          echo "full_v=$FULL_V" >> $GITHUB_OUTPUT
+          echo "full_no_v=$VER_NO_V" >> $GITHUB_OUTPUT
+          echo "major_minor_v=$MAJOR_MINOR_V" >> $GITHUB_OUTPUT
+          echo "major_minor_no_v=$MAJOR_MINOR_NO_V" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU (ARM64 emulation)
         uses: docker/setup-qemu-action@v3
@@ -59,8 +67,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ steps.version.outputs.full }}
-            type=raw,value=${{ steps.version.outputs.major_minor }}
+            type=raw,value=${{ steps.version.outputs.full_v }}
+            type=raw,value=${{ steps.version.outputs.full_no_v }}
+            type=raw,value=${{ steps.version.outputs.major_minor_v }}
+            type=raw,value=${{ steps.version.outputs.major_minor_no_v }}
             type=raw,value=latest
             type=sha,prefix=sha-
 
