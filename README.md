@@ -98,7 +98,7 @@ Create a `.env` file (already in `.gitignore`):
 # Store backend — only the selected backend needs its URL/DSN
 REDIS_URL=redis://redis:6379
 # POSTGRES_DSN=postgres://e2e:e2e@postgres:5432/e2e
-# STORE_TYPE=memory   # overrides store.type in YAML (redis|postgres|memory|disabled)
+# STORE_TYPE=memory   # overrides store.type in YAML (redis|postgres|sqlite|memory|disabled)
 
 # JWT authentication secret
 # (required even when auth.enabled: false — the loader resolves {{env.JWT_SECRET}} at startup)
@@ -1154,7 +1154,7 @@ auth:
   jwt_secret: "{{env.JWT_SECRET}}"
 
 store:
-  type: redis          # redis | postgres | memory | disabled   (default: redis)
+  type: redis          # redis | postgres | sqlite | memory | disabled   (default: redis)
   redis:
     url: "{{env.REDIS_URL}}"
     ttl: 300s          # How long received messages are kept
@@ -1163,6 +1163,9 @@ store:
     cluster_mode: false
   postgres:
     dsn: "{{env.POSTGRES_DSN}}"
+    ttl: 300s
+  sqlite:
+    path: "{{env.SQLITE_PATH}}"
     ttl: 300s
   memory:
     ttl: 300s
@@ -1188,12 +1191,13 @@ logging:
 
 The message store used to buffer received messages between the webhook
 ingestion and the `webhook` receiver is pluggable. Select the backend with the
-`store.type` key (`redis` | `postgres` | `memory` | `disabled`, default `redis`).
+`store.type` key (`redis` | `postgres` | `sqlite` | `memory` | `disabled`, default `redis`).
 
 | Backend | Purpose |
 |---------|---------|
 | `redis` | **Default.** Distributed, supports cluster mode. Requires `REDIS_URL`. |
 | `postgres` | Distributed, relational. Requires `POSTGRES_DSN` (pgx/v5). Schema is created automatically on startup. |
+| `sqlite` | Embedded, single-writer, file-backed. Requires `SQLITE_PATH`; no external service. Schema is auto-created. A TTL of a few minutes is recommended. |
 | `memory` | Single-process, in-memory, mutex-protected. No external dependency. Great for local dev and CI. |
 | `disabled` | Fully disables the database (no-op store). `webhook` receivers poll until their timeout. |
 
@@ -1212,7 +1216,8 @@ keep working unchanged.
 |----------|----------|---------|-------------|
 | `REDIS_URL` | Yes (if `store.type: redis`) | `config.yaml` | Redis connection URL (e.g. `redis://localhost:6379`) |
 | `POSTGRES_DSN` | Yes (if `store.type: postgres`) | `config.yaml` | PostgreSQL connection DSN (pgx/v5 format) |
-| `STORE_TYPE` | No | `config.yaml` | Overrides `store.type` (`redis`/`postgres`/`memory`/`disabled`) |
+| `SQLITE_PATH` | Yes (if `store.type: sqlite`) | `config.yaml` | SQLite database file path (e.g. `/data/e2e.db`) |
+| `STORE_TYPE` | No | `config.yaml` | Overrides `store.type` (`redis`/`postgres`/`sqlite`/`memory`/`disabled`) |
 | `JWT_SECRET` | Yes | `config.yaml` | Shared secret for JWT signing/validation |
 | `WEBHOOK_BASE_URL` | No | `config.yaml` | Base URL for webhook receiver callbacks |
 | `IMAP_HOST` | No | Test YAMLs | IMAP server hostname for email tests |

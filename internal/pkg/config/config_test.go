@@ -48,6 +48,10 @@ store:
 	if cfg.Store.Memory.TTL != 300*time.Second {
 		t.Errorf("expected default memory ttl 300s, got %v", cfg.Store.Memory.TTL)
 	}
+
+	if cfg.Store.SQLite.TTL != 300*time.Second {
+		t.Errorf("expected default sqlite ttl 300s, got %v", cfg.Store.SQLite.TTL)
+	}
 }
 
 func TestLoadConfig_FullStoreConfig(t *testing.T) {
@@ -93,6 +97,32 @@ store:
 
 	if cfg.Store.Memory.TTL != 10*time.Second {
 		t.Errorf("expected memory ttl 10s, got %v", cfg.Store.Memory.TTL)
+	}
+}
+
+func TestLoadConfig_SQLiteStore(t *testing.T) {
+	path := writeConfig(t, `
+store:
+  type: sqlite
+  sqlite:
+    path: "/data/e2e.db"
+    ttl: 300s
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if cfg.Store.Type != "sqlite" {
+		t.Errorf("expected type sqlite, got %q", cfg.Store.Type)
+	}
+
+	if cfg.Store.SQLite.Path != "/data/e2e.db" {
+		t.Errorf("expected sqlite path /data/e2e.db, got %q", cfg.Store.SQLite.Path)
+	}
+
+	if cfg.Store.SQLite.TTL != 5*time.Minute {
+		t.Errorf("expected sqlite ttl 5m, got %v", cfg.Store.SQLite.TTL)
 	}
 }
 

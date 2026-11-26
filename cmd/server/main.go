@@ -112,6 +112,19 @@ func main() {
 
 		return s, nil
 	})
+	storeRegistry.Register("sqlite", func(cfg config.StoreConfig) (ports.Store, error) {
+		s, err := store.NewSQLiteStore(cfg.SQLite)
+		if err != nil {
+			return nil, err
+		}
+
+		lg.Info().
+			Str(logger.AttrStoreType, "sqlite").
+			Str(logger.AttrPath, cfg.SQLite.Path).
+			Msg("store connection established")
+
+		return s, nil
+	})
 	storeRegistry.Register("memory", func(cfg config.StoreConfig) (ports.Store, error) {
 		lg.Info().
 			Str(logger.AttrStoreType, "memory").
