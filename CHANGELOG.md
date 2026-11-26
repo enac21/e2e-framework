@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/enac21/e2e-framework/compare/v0.4.0...v0.5.0) (2026-11-26)
+
+
+### Features
+
+* **store:** add sqlite backend ([5b85c0b](https://github.com/enac21/e2e-framework/commit/5b85c0b883606e1a6a34a4108a913f396f5c58eb))
+* **store:** add sqlite backend ([3c23f84](https://github.com/enac21/e2e-framework/commit/3c23f8449e5f1b1d1f570edb29f541ca1e69330d))
+
+
+### Bug Fixes
+
+* always publish docker tags with leading v (e.g. v0.4.0) ([9359701](https://github.com/enac21/e2e-framework/commit/9359701963b1745bbaa88d5094ee6a3168aea66f))
+* calculate docker tags explicitly for workflow_dispatch and tag pushes ([4e1a1ce](https://github.com/enac21/e2e-framework/commit/4e1a1ce9426aa50d83fb5af77f8c02a41a19bc3e))
+* use format() instead of + for string concat in checkout ref ([019c510](https://github.com/enac21/e2e-framework/commit/019c51004674b3eac0782d5bbd4d9b84d521a409))
+
 ## [0.4.0](https://github.com/enac21/e2e-framework/compare/v0.3.0...v0.4.0) (2026-10-26)
 
 
