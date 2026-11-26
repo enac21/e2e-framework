@@ -26,6 +26,11 @@ type PostgresStoreConfig struct {
 	TTL time.Duration `yaml:"ttl"`
 }
 
+type SQLiteStoreConfig struct {
+	Path string        `yaml:"path"`
+	TTL  time.Duration `yaml:"ttl"`
+}
+
 type MemoryStoreConfig struct {
 	TTL time.Duration `yaml:"ttl"`
 }
@@ -41,6 +46,7 @@ type StoreConfig struct {
 	Type     string              `yaml:"type"`
 	Redis    RedisStoreConfig    `yaml:"redis"`
 	Postgres PostgresStoreConfig `yaml:"postgres"`
+	SQLite   SQLiteStoreConfig   `yaml:"sqlite"`
 	Memory   MemoryStoreConfig   `yaml:"memory"`
 }
 
@@ -101,6 +107,10 @@ func LoadConfig(path string) (*Config, error) {
 
 	if cfg.Store.Postgres.TTL == 0 {
 		cfg.Store.Postgres.TTL = 300 * time.Second
+	}
+
+	if cfg.Store.SQLite.TTL == 0 {
+		cfg.Store.SQLite.TTL = 300 * time.Second
 	}
 
 	if cfg.Store.Memory.TTL == 0 {
